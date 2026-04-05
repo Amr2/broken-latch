@@ -18,10 +18,13 @@ use tauri::{Manager, State};
 use tauri_plugin_sql::{Builder as SqlBuilder};
 
 use overlay::{OverlayWindow, RegionManager};
+use hook::{inject_into_league, PipeMessage, PipeServer};
 
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
     region_manager: Mutex<RegionManager>,
+    pipe_server: Mutex<Option<PipeServer>>,
+    hook_status: Mutex<String>,
 }
 
 #[tauri::command]
@@ -85,6 +88,31 @@ async fn get_interactive_regions(state: State<'_, AppState>) -> Result<Vec<overl
     }
 }
 
+#[tauri::command]
+async fn inject_hook() -> Result<(), String> {
+    // Get DLL path from executable directory
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("Failed to get exe directory")?.
+        to_path_buf();
+
+    let dll_path = exe_dir.join("broken_latch_hook.dll");
+
+    if !dll_path.exists() {
+        return Err(format!("DLL not found at {:?}", dll_path));
+    }
+
+    inject_into_league(dll_path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_hook_status(state: State<'_, AppState>) -> Result<String, String> {
+    let status = state.hook_status.lock().unwrap();
+    Ok(status.clone())
+}
+
 #[tokio::main]
 async fn main() {
     // Load platform configuration
@@ -139,7 +167,41 @@ async fn main() {
             app.manage(AppState {
                 overlay: Mutex::new(overlay),
                 region_manager: Mutex::new(RegionManager::new()),
+                pipe_server: Mutex::new(None),
+                hook_status: Mutex::new("Not injected".to_string()),
             });
+
+            // Initialize pipe server for DLL communication
+            match PipeServer::new() {
+                Ok(server) => {
+                    println!("Named pipe server started");
+                    
+                    // Store pipe server in state
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        loop {
+                            if let Ok(state) = handle.state::<AppState>().try_lock() {
+                                if let Some(ref server) = *state.pipe_server.lock().unwrap() {
+                                    if let Some(msg) = server.try_recv() {
+                                        let status = match msg {
+                                            PipeMessage::DX11Hooked => "DirectX 11 hooked",
+                                            PipeMessage::DX12Hooked => "DirectX 12 hooked",
+                                            PipeMessage::HookFailed => "Hook failed",
+                                            PipeMessage::Custom(ref s) => s.as_str(),
+                                        };
+                                        *state.hook_status.lock().unwrap() = status.to_string();
+                                        println!("Hook status: {}", status);
+                                    }
+                                }
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                    });
+                    
+                    *app.state::<AppState>().pipe_server.lock().unwrap() = Some(server);
+                }
+                Err(e) => eprintln!("Failed to start pipe server: {}", e),
+            }
 
             println!("Platform ready!");
             Ok(())
@@ -151,6 +213,8 @@ async fn main() {
             update_interactive_regions,
             set_screen_capture_visible,
             get_interactive_regions,
+            inject_hook,
+            get_hook_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
