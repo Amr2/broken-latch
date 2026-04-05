@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>broken-latch Overlay</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background: transparent;
+        pointer-events: none; /* Default to click-through */
+      }
+
+      #overlay-root {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+
+      /* App widget containers will be injected here */
+      .widget-container {
+        position: absolute;
+        pointer-events: auto; /* Widgets can capture input */
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay-root">
+      <!-- App widgets will be dynamically inserted here by Task 06 -->
+    </div>
+  </body>
+</html>
