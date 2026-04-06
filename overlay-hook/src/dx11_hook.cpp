@@ -1,6 +1,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include "hook.h"
+#include "MinHook.h"
 
 // MinHook would normally be included here
 // For now, we'll use manual hooking approach or placeholder
@@ -95,7 +96,7 @@ HRESULT __stdcall hkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, 
 
 bool InitializeDX11Hook() {
     // Create temporary swap chain to find Present() address
-    WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, DefWindowProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"DX", nullptr };
+    WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, DefWindowProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, "DX", nullptr };
     RegisterClassEx(&wc);
     HWND hWnd = CreateWindow(wc.lpszClassName, nullptr, WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, nullptr, nullptr, wc.hInstance, nullptr);
 
@@ -146,12 +147,12 @@ bool InitializeDX11Hook() {
     UnregisterClass(wc.lpszClassName, wc.hInstance);
 
     // Hook using MinHook (placeholder - MinHook integration needed)
-    // MH_Initialize();
-    // MH_CreateHook(pPresentAddr, &hkPresent, reinterpret_cast<LPVOID*>(&oPresent));
-    // MH_CreateHook(pResizeBuffersAddr, &hkResizeBuffers, reinterpret_cast<LPVOID*>(&oResizeBuffers));
-    // MH_EnableHook(pPresentAddr);
-    // MH_EnableHook(pResizeBuffersAddr);
+    MH_Initialize();
+    MH_CreateHook(pPresentAddr, &hkPresent, reinterpret_cast<LPVOID*>(&oPresent));
+    MH_CreateHook(pResizeBuffersAddr, &hkResizeBuffers, reinterpret_cast<LPVOID*>(&oResizeBuffers));
+    MH_EnableHook(pPresentAddr);
+    MH_EnableHook(pResizeBuffersAddr);
 
     // For now, return false until MinHook is integrated
-    return false;
+    return true;
 }
