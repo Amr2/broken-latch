@@ -2,39 +2,108 @@
 node_modules/
 dist/
 dist-ssr/
+.pnp
+.pnp.js
 
 # Tauri
 src-tauri/target/
 src-tauri/WixTools/
+src-tauri/gen/
+
+# C++ Build (DirectX Hook DLL)
+overlay-hook/build/
+overlay-hook/cmake-build-*/
+overlay-hook/.vs/
+overlay-hook/out/
+target/debug/
+target/release/
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.exp
+*.lib
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
 
 # Database
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+
+# Config (local user config should not be committed)
+src-tauri/config/local.toml
+config.local.toml
 
 # Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Build
+# Build artifacts
 *.exe
 *.msi
 *.dmg
 *.deb
 *.AppImage
+*.rpm
+*.pkg
 
-# App data
-src-tauri/icons/
+# Rust
+Cargo.lock
+**/*.rs.bk
+
+# MinHook library (downloaded externally)
+overlay-hook/lib/MinHook.*
+overlay-hook/include/MinHook.h
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+.cache/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Package manager lock files (optional - uncomment if needed)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
