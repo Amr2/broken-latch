@@ -1,9 +1,7 @@
-use std::ffi::c_void;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
-use windows::Win32::Security::*;
 use windows::Win32::Storage::FileSystem::*;
 use windows::Win32::System::Pipes::*;
 
@@ -62,7 +60,7 @@ fn run_pipe_server(tx: Sender<PipeMessage>) -> Result<(), Box<dyn std::error::Er
                 BUFFER_SIZE,
                 0,
                 None,
-            )?;
+            );
 
             if h_pipe.is_invalid() {
                 return Err("Failed to create named pipe".into());
@@ -70,17 +68,16 @@ fn run_pipe_server(tx: Sender<PipeMessage>) -> Result<(), Box<dyn std::error::Er
 
             // Wait for client connection
             let connected = ConnectNamedPipe(h_pipe, None).is_ok()
-                || GetLastError() == ERROR_PIPE_CONNECTED;
+                || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
 
             if connected {
                 // Read message from pipe
                 let mut buffer = vec![0u8; BUFFER_SIZE as usize];
-                let mut bytes_read = 0;
+                let mut bytes_read = 0u32;
 
                 let read_result = ReadFile(
                     h_pipe,
-                    Some(buffer.as_mut_ptr() as *mut c_void),
-                    BUFFER_SIZE,
+                    Some(&mut buffer),
                     Some(&mut bytes_read),
                     None,
                 );

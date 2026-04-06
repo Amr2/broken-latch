@@ -4,5 +4,5 @@
 pub mod injector;
 pub mod pipe;
 
-pub use injector::{inject_into_league, DllInjector};
+pub use injector::inject_into_league;
 pub use pipe::{PipeMessage, PipeServer};

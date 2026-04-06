@@ -110,7 +110,7 @@ impl OverlayWindow {
 
         unsafe {
             // Create a combined region from all widget bounding boxes
-            let mut combined_region = CreateRectRgn(0, 0, 0, 0);
+            let combined_region = CreateRectRgn(0, 0, 0, 0);
 
             for rect in regions {
                 let widget_region = CreateRectRgn(

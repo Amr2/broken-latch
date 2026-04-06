@@ -1,6 +1,6 @@
 use std::ffi::CString;
 use std::path::PathBuf;
-use sysinfo::{ProcessExt, System, SystemExt};
+use sysinfo::System;
 use windows::core::PCSTR;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
@@ -23,11 +23,12 @@ impl DllInjector {
 
         system
             .processes()
-            .values()
-            .find(|p| {
-                p.name() == "LeagueOfLegends.exe" || p.name() == "League of Legends.exe"
+            .iter()
+            .find(|(_, p)| {
+                let name = p.name().to_string_lossy();
+                name == "LeagueOfLegends.exe" || name == "League of Legends.exe"
             })
-            .map(|p| p.pid().as_u32())
+            .map(|(pid, _)| pid.as_u32())
     }
 
     /// Inject DLL into target process
@@ -63,7 +64,7 @@ impl DllInjector {
 
             // Write DLL path to remote process
             let mut bytes_written = 0;
-            let write_result = WriteProcessMemory(
+            let write_result = windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
                 h_process,
                 remote_mem,
                 dll_path_bytes.as_ptr() as *const _,

@@ -9,7 +9,7 @@ pub fn get_migrations() -> Vec<Migration> {
     }]
 }
 
-pub async fn init_db(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn init_db(_app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Database is auto-initialized by tauri-plugin-sql with migrations
     // This function can be used for additional setup if needed
     println!("Database initialized with migrations");

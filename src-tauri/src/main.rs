@@ -176,23 +176,21 @@ async fn main() {
                 Ok(server) => {
                     println!("Named pipe server started");
                     
-                    // Store pipe server in state
+                    // Store pipe server in state and monitor it
+                    let server_clone = PipeServer::new().unwrap();
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
                         loop {
-                            if let Ok(state) = handle.state::<AppState>().try_lock() {
-                                if let Some(ref server) = *state.pipe_server.lock().unwrap() {
-                                    if let Some(msg) = server.try_recv() {
-                                        let status = match msg {
-                                            PipeMessage::DX11Hooked => "DirectX 11 hooked",
-                                            PipeMessage::DX12Hooked => "DirectX 12 hooked",
-                                            PipeMessage::HookFailed => "Hook failed",
-                                            PipeMessage::Custom(ref s) => s.as_str(),
-                                        };
-                                        *state.hook_status.lock().unwrap() = status.to_string();
-                                        println!("Hook status: {}", status);
-                                    }
-                                }
+                            if let Some(msg) = server_clone.try_recv() {
+                                let state = handle.state::<AppState>();
+                                let status = match msg {
+                                    PipeMessage::DX11Hooked => "DirectX 11 hooked",
+                                    PipeMessage::DX12Hooked => "DirectX 12 hooked",
+                                    PipeMessage::HookFailed => "Hook failed",
+                                    PipeMessage::Custom(ref s) => s.as_str(),
+                                };
+                                *state.hook_status.lock().unwrap() = status.to_string();
+                                println!("Hook status: {}", status);
                             }
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
