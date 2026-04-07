@@ -14,7 +14,7 @@ mod tray;
 mod config;
 
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
+use tauri::{Listener, Manager, State};
 use tauri_plugin_sql::{Builder as SqlBuilder};
 
 use overlay::{OverlayWindow, RegionManager};
@@ -22,6 +22,7 @@ use hook::{inject_into_league, PipeMessage, PipeServer};
 use game::detect::GameDetector;
 use game::session::SessionManager;
 use hotkey::HotkeyManager;
+use widgets::WidgetManager;
 
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
@@ -167,6 +168,81 @@ async fn get_app_hotkeys(
     Ok(manager.get_hotkeys_for_app(&app_id))
 }
 
+#[tauri::command]
+async fn create_widget_cmd(
+    config: widgets::WidgetConfig,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<String, String> {
+    manager.create_widget(config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn show_widget_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager.show_widget(&widget_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn hide_widget_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager.hide_widget(&widget_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_widget_opacity_cmd(
+    widget_id: String,
+    opacity: f32,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .set_widget_opacity(&widget_id, opacity)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_widget_position_cmd(
+    widget_id: String,
+    position: widgets::Position,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .set_widget_position(&widget_id, position)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_widget_click_through_cmd(
+    widget_id: String,
+    enabled: bool,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .set_click_through(&widget_id, enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_widget_state_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<widgets::WidgetState, String> {
+    manager.get_state(&widget_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn destroy_widget_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .destroy_widget(&widget_id)
+        .map_err(|e| e.to_string())
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize logger
@@ -236,6 +312,20 @@ async fn main() {
                 }
             };
 
+            // Create and register widget manager
+            let widget_manager = Arc::new(WidgetManager::new(app.handle().clone()));
+            app.manage(widget_manager.clone());
+
+            // Subscribe to game phase changes for widget auto-show/hide
+            let widget_mgr_for_phase = widget_manager.clone();
+            app.listen("game_phase_changed", move |event| {
+                if let Ok(phase_event) = serde_json::from_str::<game::PhaseChangeEvent>(event.payload()) {
+                    let phase_str = format!("{:?}", phase_event.current);
+                    widget_mgr_for_phase.handle_phase_change(&phase_str);
+                }
+            });
+            println!("Widget manager initialized");
+
             // Store state
             app.manage(AppState {
                 overlay: Mutex::new(overlay),
@@ -303,6 +393,14 @@ async fn main() {
             unregister_hotkey_cmd,
             is_hotkey_registered,
             get_app_hotkeys,
+            create_widget_cmd,
+            show_widget_cmd,
+            hide_widget_cmd,
+            set_widget_opacity_cmd,
+            set_widget_position_cmd,
+            set_widget_click_through_cmd,
+            get_widget_state_cmd,
+            destroy_widget_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
