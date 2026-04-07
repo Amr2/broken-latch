@@ -21,6 +21,7 @@ use overlay::{OverlayWindow, RegionManager};
 use hook::{inject_into_league, PipeMessage, PipeServer};
 use game::detect::GameDetector;
 use game::session::SessionManager;
+use hotkey::HotkeyManager;
 
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
@@ -128,6 +129,44 @@ async fn get_game_session(
     Ok(session_mgr.get_current_session())
 }
 
+#[tauri::command]
+async fn register_hotkey_cmd(
+    app_id: String,
+    hotkey_id: String,
+    keys: String,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<i32, String> {
+    manager
+        .register(&app_id, &hotkey_id, &keys)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn unregister_hotkey_cmd(
+    win_hotkey_id: i32,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<(), String> {
+    manager
+        .unregister(win_hotkey_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn is_hotkey_registered(
+    keys: String,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<bool, String> {
+    Ok(manager.is_hotkey_taken(&keys))
+}
+
+#[tauri::command]
+async fn get_app_hotkeys(
+    app_id: String,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<Vec<hotkey::HotkeyRegistration>, String> {
+    Ok(manager.get_hotkeys_for_app(&app_id))
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize logger
@@ -141,10 +180,15 @@ async fn main() {
     let default_opacity = config.overlay.default_opacity;
     let screen_capture_visible = config.overlay.screen_capture_visible;
 
-    // Create shared game detector and session manager
+    // Create shared game detector, session manager, and hotkey manager
     let detector = Arc::new(GameDetector::new());
     let session_mgr = Arc::new(SessionManager::new());
     let detector_for_loop = detector.clone();
+
+    let hotkey_manager = Arc::new(
+        HotkeyManager::new().expect("Failed to create hotkey manager"),
+    );
+    let hotkey_manager_for_loop = hotkey_manager.clone();
 
     tauri::Builder::default()
         .plugin(
@@ -154,6 +198,7 @@ async fn main() {
         )
         .manage(detector)
         .manage(session_mgr)
+        .manage(hotkey_manager)
         .setup(move |app| {
             println!("Platform initializing...");
 
@@ -198,6 +243,11 @@ async fn main() {
                 pipe_server: Mutex::new(None),
                 hook_status: Mutex::new("Not injected".to_string()),
             });
+
+            // Start hotkey message loop
+            let app_handle_for_hotkeys = app.handle().clone();
+            hotkey_manager_for_loop.start_message_loop(app_handle_for_hotkeys);
+            println!("Hotkey manager started");
 
             // Start game detection loop
             let app_handle_for_detector = app.handle().clone();
@@ -249,6 +299,10 @@ async fn main() {
             get_hook_status,
             get_game_phase,
             get_game_session,
+            register_hotkey_cmd,
+            unregister_hotkey_cmd,
+            is_hotkey_registered,
+            get_app_hotkeys,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
