@@ -23,6 +23,9 @@ use game::detect::GameDetector;
 use game::session::SessionManager;
 use hotkey::HotkeyManager;
 use widgets::WidgetManager;
+use apps::registry::AppRegistry;
+use apps::loader::AppLoader;
+use apps::sandbox::PermissionSandbox;
 
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
@@ -243,6 +246,50 @@ async fn destroy_widget_cmd(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn install_app_cmd(
+    lolapp_path: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<String, String> {
+    registry
+        .install_app(std::path::PathBuf::from(lolapp_path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn uninstall_app_cmd(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<(), String> {
+    registry.uninstall_app(&app_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_app_cmd(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    let app = registry.get_app(&app_id).map_err(|e| e.to_string())?;
+    loader.start_app(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stop_app_cmd(
+    app_id: String,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    loader.stop_app(&app_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_installed_apps_cmd(
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<Vec<apps::InstalledApp>, String> {
+    registry.list_apps().map_err(|e| e.to_string())
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize logger
@@ -315,6 +362,18 @@ async fn main() {
             // Create and register widget manager
             let widget_manager = Arc::new(WidgetManager::new(app.handle().clone()));
             app.manage(widget_manager.clone());
+
+            // Create app registry, loader, and sandbox
+            let app_registry = Arc::new(AppRegistry::new(app.handle().clone()));
+            let app_loader = Arc::new(AppLoader::new(
+                widget_manager.clone(),
+                hotkey_manager_for_loop.clone(),
+            ));
+            let sandbox = Arc::new(std::sync::Mutex::new(PermissionSandbox::new()));
+            app.manage(app_registry);
+            app.manage(app_loader);
+            app.manage(sandbox);
+            println!("App lifecycle manager initialized");
 
             // Subscribe to game phase changes for widget auto-show/hide
             let widget_mgr_for_phase = widget_manager.clone();
@@ -401,6 +460,11 @@ async fn main() {
             set_widget_click_through_cmd,
             get_widget_state_cmd,
             destroy_widget_cmd,
+            install_app_cmd,
+            uninstall_app_cmd,
+            start_app_cmd,
+            stop_app_cmd,
+            list_installed_apps_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
