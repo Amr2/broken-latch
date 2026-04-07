@@ -434,6 +434,19 @@ async fn main() {
                 Err(e) => eprintln!("Failed to start pipe server: {}", e),
             }
 
+            // Start HTTP API server
+            let api_state = http_api::ApiState {
+                detector: app.state::<Arc<GameDetector>>().inner().clone(),
+                session_mgr: app.state::<Arc<SessionManager>>().inner().clone(),
+                hotkey_manager: app.state::<Arc<HotkeyManager>>().inner().clone(),
+                widget_manager: widget_manager.clone(),
+            };
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = http_api::start_api_server(api_state).await {
+                    eprintln!("HTTP API server failed: {}", e);
+                }
+            });
+
             println!("Platform ready!");
             Ok(())
         })
