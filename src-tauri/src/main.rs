@@ -120,6 +120,10 @@ async fn main() {
     println!("broken-latch Platform v{}", config.version);
     println!("Configuration loaded successfully");
 
+    // Extract config values needed inside the setup closure before it captures anything
+    let default_opacity = config.overlay.default_opacity;
+    let screen_capture_visible = config.overlay.screen_capture_visible;
+
     // Initialize Tauri app
     tauri::Builder::default()
         .plugin(
@@ -127,9 +131,18 @@ async fn main() {
                 .add_migrations("sqlite:platform.db", db::get_migrations())
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             println!("Platform initializing...");
-            
+
+            // In dev mode, open DevTools on the main window so we can invoke commands from console
+            #[cfg(debug_assertions)]
+            {
+                use tauri::Manager;
+                if let Some(win) = app.get_webview_window("main") {
+                    win.open_devtools();
+                }
+            }
+
             // Initialize database
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -144,13 +157,12 @@ async fn main() {
                     println!("Overlay window created successfully");
                     
                     // Apply default opacity from config
-                    let opacity = config.overlay.default_opacity;
-                    if let Err(e) = window.set_opacity(opacity) {
+                    if let Err(e) = window.set_opacity(default_opacity) {
                         eprintln!("Failed to set overlay opacity: {}", e);
                     }
-                    
+
                     // Apply screen capture setting from config
-                    let capture_visible = config.overlay.screen_capture_visible;
+                    let capture_visible = screen_capture_visible;
                     if let Err(e) = window.set_screen_capture_visible(capture_visible) {
                         eprintln!("Failed to set screen capture visibility: {}", e);
                     }

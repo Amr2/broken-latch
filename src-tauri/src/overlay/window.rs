@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, Window};
+use tauri::{AppHandle, WebviewWindow};
 use windows::Win32::{
     Foundation::*,
     UI::WindowsAndMessaging::*,
@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 
 /// Overlay window manager
 pub struct OverlayWindow {
-    window: Window,
-    hwnd: HWND,
+    window: WebviewWindow,
+    // Stored as isize so OverlayWindow is Send + Sync (HWND wraps *mut c_void which is not Send)
+    hwnd: isize,
     interactive_regions: Arc<Mutex<Vec<Rect>>>,
 }
 
@@ -25,10 +26,10 @@ impl OverlayWindow {
     /// Create the transparent fullscreen overlay
     pub fn create(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
         // Create Tauri window with overlay configuration
-        let window = tauri::WindowBuilder::new(
+        let window = tauri::WebviewWindowBuilder::new(
             app,
             "overlay",
-            tauri::WindowUrl::App("overlay.html".into())
+            tauri::WebviewUrl::App("overlay.html".into())
         )
         .transparent(true)
         .decorations(false)
@@ -38,11 +39,14 @@ impl OverlayWindow {
         .visible(false) // Start hidden, show when game detected
         .build()?;
 
-        // Get the Windows HWND
-        let hwnd = window.hwnd()?;
+        // Get the Windows HWND and store as raw isize
+        let hwnd_raw = window.hwnd()?;
+        let hwnd = hwnd_raw.0 as isize;
 
-        // Apply Windows-specific styles
-        Self::apply_overlay_styles(hwnd)?;
+        // Apply Windows-specific styles (non-fatal — some APIs may be unavailable in dev mode)
+        if let Err(e) = Self::apply_overlay_styles(hwnd) {
+            eprintln!("Warning: overlay styles partially applied: {}", e);
+        }
 
         Ok(Self {
             window,
@@ -52,7 +56,8 @@ impl OverlayWindow {
     }
 
     /// Apply Windows extended styles for overlay behavior
-    fn apply_overlay_styles(hwnd: HWND) -> Result<(), Box<dyn std::error::Error>> {
+    fn apply_overlay_styles(hwnd: isize) -> Result<(), Box<dyn std::error::Error>> {
+        let hwnd = HWND(hwnd as *mut _);
         unsafe {
             // Get current extended styles
             let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
@@ -72,7 +77,7 @@ impl OverlayWindow {
             // Force window to top of z-order
             SetWindowPos(
                 hwnd,
-                HWND_TOPMOST,
+                Some(HWND_TOPMOST),
                 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             )?;
@@ -83,8 +88,9 @@ impl OverlayWindow {
 
     /// Set the entire window to click-through mode
     pub fn set_click_through(&self, enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let hwnd = HWND(self.hwnd as *mut _);
         unsafe {
-            let ex_style = GetWindowLongW(self.hwnd, GWL_EXSTYLE);
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
 
             let new_style = if enabled {
                 ex_style | (WS_EX_TRANSPARENT.0 as i32)
@@ -92,7 +98,7 @@ impl OverlayWindow {
                 ex_style & !(WS_EX_TRANSPARENT.0 as i32)
             };
 
-            SetWindowLongW(self.hwnd, GWL_EXSTYLE, new_style);
+            SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
         }
 
         Ok(())
@@ -108,6 +114,7 @@ impl OverlayWindow {
             return self.set_click_through(true);
         }
 
+        let hwnd = HWND(self.hwnd as *mut _);
         unsafe {
             // Create a combined region from all widget bounding boxes
             let combined_region = CreateRectRgn(0, 0, 0, 0);
@@ -120,12 +127,12 @@ impl OverlayWindow {
                     rect.y + rect.height,
                 );
 
-                CombineRgn(combined_region, combined_region, widget_region, RGN_OR);
-                let _ = DeleteObject(widget_region);
+                CombineRgn(Some(combined_region), Some(combined_region), Some(widget_region), RGN_OR);
+                let _ = DeleteObject(widget_region.into());
             }
 
             // Apply the region to the window
-            let _ = SetWindowRgn(self.hwnd, combined_region, true);
+            let _ = SetWindowRgn(hwnd, Some(combined_region), true);
 
             // Ensure window is NOT click-through (interactive regions work)
             self.set_click_through(false)?;
@@ -148,11 +155,12 @@ impl OverlayWindow {
 
     /// Set window opacity (0.0 = invisible, 1.0 = opaque)
     pub fn set_opacity(&self, opacity: f32) -> Result<(), Box<dyn std::error::Error>> {
+        let hwnd = HWND(self.hwnd as *mut _);
         let opacity_byte = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
 
         unsafe {
             SetLayeredWindowAttributes(
-                self.hwnd,
+                hwnd,
                 COLORREF(0),
                 opacity_byte,
                 LWA_ALPHA,
@@ -164,6 +172,7 @@ impl OverlayWindow {
 
     /// Set screen capture visibility for this window
     pub fn set_screen_capture_visible(&self, visible: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let hwnd = HWND(self.hwnd as *mut _);
         unsafe {
             let affinity = if visible {
                 WDA_NONE
@@ -171,7 +180,7 @@ impl OverlayWindow {
                 WDA_EXCLUDEFROMCAPTURE
             };
 
-            SetWindowDisplayAffinity(self.hwnd, affinity)?;
+            SetWindowDisplayAffinity(hwnd, affinity)?;
         }
 
         Ok(())

@@ -70,7 +70,7 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         // Set our render target (game's back buffer)
         g_pd3dContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
 
-        // Render overlay on top of game frame
+        // Render overlay on top of game frame (test texture created in InitializeOverlayResources)
         RenderOverlay(g_pd3dContext);
 
         // Restore original render target
