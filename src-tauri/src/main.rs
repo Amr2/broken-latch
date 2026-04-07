@@ -13,12 +13,14 @@ mod db;
 mod tray;
 mod config;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 use tauri_plugin_sql::{Builder as SqlBuilder};
 
 use overlay::{OverlayWindow, RegionManager};
 use hook::{inject_into_league, PipeMessage, PipeServer};
+use game::detect::GameDetector;
+use game::session::SessionManager;
 
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
@@ -90,12 +92,11 @@ async fn get_interactive_regions(state: State<'_, AppState>) -> Result<Vec<overl
 
 #[tauri::command]
 async fn inject_hook() -> Result<(), String> {
-    // Get DLL path from executable directory
     let exe_dir = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .parent()
-        .ok_or("Failed to get exe directory")?.
-        to_path_buf();
+        .ok_or("Failed to get exe directory")?
+        .to_path_buf();
 
     let dll_path = exe_dir.join("broken_latch_hook.dll");
 
@@ -113,28 +114,49 @@ async fn get_hook_status(state: State<'_, AppState>) -> Result<String, String> {
     Ok(status.clone())
 }
 
+#[tauri::command]
+async fn get_game_phase(
+    detector: State<'_, Arc<GameDetector>>,
+) -> Result<game::GamePhase, String> {
+    Ok(detector.get_current_phase())
+}
+
+#[tauri::command]
+async fn get_game_session(
+    session_mgr: State<'_, Arc<SessionManager>>,
+) -> Result<Option<game::GameSession>, String> {
+    Ok(session_mgr.get_current_session())
+}
+
 #[tokio::main]
 async fn main() {
+    // Initialize logger
+    env_logger::init();
+
     // Load platform configuration
     let config = config::load_config().expect("Failed to load config");
     println!("broken-latch Platform v{}", config.version);
     println!("Configuration loaded successfully");
 
-    // Extract config values needed inside the setup closure before it captures anything
     let default_opacity = config.overlay.default_opacity;
     let screen_capture_visible = config.overlay.screen_capture_visible;
 
-    // Initialize Tauri app
+    // Create shared game detector and session manager
+    let detector = Arc::new(GameDetector::new());
+    let session_mgr = Arc::new(SessionManager::new());
+    let detector_for_loop = detector.clone();
+
     tauri::Builder::default()
         .plugin(
             SqlBuilder::default()
                 .add_migrations("sqlite:platform.db", db::get_migrations())
                 .build(),
         )
+        .manage(detector)
+        .manage(session_mgr)
         .setup(move |app| {
             println!("Platform initializing...");
 
-            // In dev mode, open DevTools on the main window so we can invoke commands from console
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
@@ -155,18 +177,12 @@ async fn main() {
             let overlay = match OverlayWindow::create(app.handle()) {
                 Ok(window) => {
                     println!("Overlay window created successfully");
-                    
-                    // Apply default opacity from config
                     if let Err(e) = window.set_opacity(default_opacity) {
                         eprintln!("Failed to set overlay opacity: {}", e);
                     }
-
-                    // Apply screen capture setting from config
-                    let capture_visible = screen_capture_visible;
-                    if let Err(e) = window.set_screen_capture_visible(capture_visible) {
+                    if let Err(e) = window.set_screen_capture_visible(screen_capture_visible) {
                         eprintln!("Failed to set screen capture visibility: {}", e);
                     }
-                    
                     Some(window)
                 }
                 Err(e) => {
@@ -183,12 +199,19 @@ async fn main() {
                 hook_status: Mutex::new("Not injected".to_string()),
             });
 
+            // Start game detection loop
+            let app_handle_for_detector = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                println!("Starting game lifecycle detection...");
+                detector_for_loop
+                    .start_detection_loop(app_handle_for_detector)
+                    .await;
+            });
+
             // Initialize pipe server for DLL communication
             match PipeServer::new() {
                 Ok(server) => {
                     println!("Named pipe server started");
-                    
-                    // Store pipe server in state and monitor it
                     let server_clone = PipeServer::new().unwrap();
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
@@ -207,7 +230,6 @@ async fn main() {
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     });
-                    
                     *app.state::<AppState>().pipe_server.lock().unwrap() = Some(server);
                 }
                 Err(e) => eprintln!("Failed to start pipe server: {}", e),
@@ -225,6 +247,8 @@ async fn main() {
             get_interactive_regions,
             inject_hook,
             get_hook_status,
+            get_game_phase,
+            get_game_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
