@@ -290,18 +290,95 @@ async fn list_installed_apps_cmd(
     registry.list_apps().map_err(|e| e.to_string())
 }
 
+// ── Frontend-facing commands (no _cmd suffix) ────────────────────────────────
+
+#[tauri::command]
+async fn list_installed_apps(
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<Vec<apps::InstalledApp>, String> {
+    registry.list_apps().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn install_app(
+    lolapp_path: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<String, String> {
+    registry
+        .install_app(std::path::PathBuf::from(lolapp_path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn uninstall_app(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<(), String> {
+    registry.uninstall_app(&app_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_app(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    let app = registry.get_app(&app_id).map_err(|e| e.to_string())?;
+    loader.start_app(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stop_app(
+    app_id: String,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    loader.stop_app(&app_id).map_err(|e| e.to_string())
+}
+
+// ── Platform config commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_platform_config(
+    config: State<'_, Arc<Mutex<config::PlatformConfig>>>,
+) -> Result<config::PlatformConfig, String> {
+    Ok(config.lock().unwrap().clone())
+}
+
+#[tauri::command]
+async fn update_platform_config(
+    config_state: State<'_, Arc<Mutex<config::PlatformConfig>>>,
+    config: config::PlatformConfig,
+) -> Result<(), String> {
+    *config_state.lock().unwrap() = config.clone();
+    config::save_config(&config).map_err(|e| e.to_string())
+}
+
+// ── File picker ───────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn pick_lolapp_file() -> Option<String> {
+    use rfd::FileDialog;
+    FileDialog::new()
+        .add_filter("broken-latch App", &["lolapp"])
+        .set_title("Select a .lolapp file")
+        .pick_file()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize logger
     env_logger::init();
 
     // Load platform configuration
-    let config = config::load_config().expect("Failed to load config");
-    println!("broken-latch Platform v{}", config.version);
+    let raw_config = config::load_config().expect("Failed to load config");
+    println!("broken-latch Platform v{}", raw_config.version);
     println!("Configuration loaded successfully");
 
-    let default_opacity = config.overlay.default_opacity;
-    let screen_capture_visible = config.overlay.screen_capture_visible;
+    let default_opacity = raw_config.overlay.default_opacity;
+    let screen_capture_visible = raw_config.overlay.screen_capture_visible;
+    let config = Arc::new(Mutex::new(raw_config));
 
     // Create shared game detector, session manager, and hotkey manager
     let detector = Arc::new(GameDetector::new());
@@ -322,6 +399,7 @@ async fn main() {
         .manage(detector)
         .manage(session_mgr)
         .manage(hotkey_manager)
+        .manage(config)
         .setup(move |app| {
             println!("Platform initializing...");
 
@@ -448,6 +526,12 @@ async fn main() {
             });
 
             sdk_server::log_sdk_info();
+
+            // Set up system tray
+            if let Err(e) = tray::setup_tray(app.handle()) {
+                eprintln!("Failed to create system tray: {}", e);
+            }
+
             println!("Platform ready!");
             Ok(())
         })
@@ -479,6 +563,17 @@ async fn main() {
             start_app_cmd,
             stop_app_cmd,
             list_installed_apps_cmd,
+            // Frontend-facing aliases (no _cmd suffix)
+            list_installed_apps,
+            install_app,
+            uninstall_app,
+            start_app,
+            stop_app,
+            // Platform config
+            get_platform_config,
+            update_platform_config,
+            // File picker
+            pick_lolapp_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
