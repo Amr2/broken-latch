@@ -152,6 +152,7 @@ pub mod registry;
 pub mod loader;
 pub mod sandbox;
 pub mod updater;
+pub mod platform_updater;
 
 #[cfg(test)]
 mod tests {

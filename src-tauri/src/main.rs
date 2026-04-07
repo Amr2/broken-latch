@@ -26,6 +26,8 @@ use widgets::WidgetManager;
 use apps::registry::AppRegistry;
 use apps::loader::AppLoader;
 use apps::sandbox::PermissionSandbox;
+use apps::updater::{AppRegistry as RemoteAppRegistry, RegistryClient};
+use apps::platform_updater::{PlatformRelease, PlatformUpdater};
 
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
@@ -354,6 +356,63 @@ async fn update_platform_config(
     config::save_config(&config).map_err(|e| e.to_string())
 }
 
+// ── Distribution / update commands ───────────────────────────────────────────
+
+#[tauri::command]
+async fn fetch_app_registry(
+    registry_client: State<'_, Arc<RegistryClient>>,
+) -> Result<RemoteAppRegistry, String> {
+    registry_client.fetch_registry().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_registry_app(
+    app_id: String,
+    registry_client: State<'_, Arc<RegistryClient>>,
+) -> Result<String, String> {
+    let registry = registry_client.fetch_registry().await.map_err(|e| e.to_string())?;
+    let entry = registry
+        .apps
+        .iter()
+        .find(|a| a.id == app_id)
+        .ok_or_else(|| "App not found in registry".to_string())?;
+    let temp_path = std::env::temp_dir().join(format!("{}.lolapp", app_id));
+    registry_client
+        .download_app(entry, temp_path.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(temp_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn check_platform_update(
+    platform_updater: State<'_, Arc<PlatformUpdater>>,
+) -> Result<Option<PlatformRelease>, String> {
+    platform_updater.check_for_update().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_platform_update(
+    platform_updater: State<'_, Arc<PlatformUpdater>>,
+    release: PlatformRelease,
+) -> Result<String, String> {
+    let path = platform_updater
+        .download_update(&release)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn apply_platform_update(
+    platform_updater: State<'_, Arc<PlatformUpdater>>,
+    installer_path: String,
+) -> Result<(), String> {
+    platform_updater
+        .apply_update(std::path::PathBuf::from(installer_path))
+        .map_err(|e| e.to_string())
+}
+
 // ── File picker ───────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -527,6 +586,28 @@ async fn main() {
 
             sdk_server::log_sdk_info();
 
+            // Register registry client and platform updater
+            let registry_client = Arc::new(RegistryClient::new());
+            let platform_updater = Arc::new(PlatformUpdater::new());
+            app.manage(registry_client);
+            let updater_for_check = platform_updater.clone();
+            app.manage(platform_updater);
+
+            // Background platform update check (5s after startup)
+            let app_handle_for_update = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                match updater_for_check.check_for_update().await {
+                    Ok(Some(release)) => {
+                        log::info!("Platform update available: v{}", release.version);
+                        use tauri::Emitter;
+                        app_handle_for_update.emit("platform_update_available", &release).ok();
+                    }
+                    Ok(None) => log::info!("Platform is up to date"),
+                    Err(e) => log::warn!("Failed to check for updates: {}", e),
+                }
+            });
+
             // Set up system tray
             if let Err(e) = tray::setup_tray(app.handle()) {
                 eprintln!("Failed to create system tray: {}", e);
@@ -574,6 +655,12 @@ async fn main() {
             update_platform_config,
             // File picker
             pick_lolapp_file,
+            // Distribution / updates
+            fetch_app_registry,
+            download_registry_app,
+            check_platform_update,
+            download_platform_update,
+            apply_platform_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
