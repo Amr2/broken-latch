@@ -447,6 +447,7 @@ async fn main() {
                 }
             });
 
+            sdk_server::log_sdk_info();
             println!("Platform ready!");
             Ok(())
         })

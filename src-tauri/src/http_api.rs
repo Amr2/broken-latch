@@ -49,6 +49,8 @@ pub async fn start_api_server(state: ApiState) -> Result<(), Box<dyn std::error:
         // Webhooks
         .route("/api/webhooks/register", post(register_webhook))
         .route("/api/webhooks/unregister", post(unregister_webhook))
+        // SDK file
+        .route("/sdk/loloverlay.js", get(serve_sdk))
         // CORS
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -405,6 +407,21 @@ impl IntoResponse for ApiError {
         };
         (status, Json(body)).into_response()
     }
+}
+
+/// Serve the pre-built JavaScript SDK bundle.
+/// Apps load it via: <script src="http://localhost:45678/sdk/loloverlay.js"></script>
+async fn serve_sdk() -> impl IntoResponse {
+    const SDK_CONTENT: &str = include_str!("../../sdk/dist/loloverlay.js");
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/javascript; charset=utf-8"),
+            ("Cache-Control", "public, max-age=3600"),
+        ],
+        SDK_CONTENT,
+    )
 }
 
 fn now_unix() -> i64 {

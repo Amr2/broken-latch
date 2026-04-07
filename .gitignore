@@ -2,6 +2,9 @@
 node_modules/
 dist/
 dist-ssr/
+# Exception: SDK built output is tracked because it is embedded into the
+# Rust binary via include_str! and must exist before cargo build runs.
+!sdk/dist/
 .pnp
 .pnp.js
 
