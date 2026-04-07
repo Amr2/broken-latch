@@ -10,13 +10,19 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.17.0",
     "@tauri-apps/api": "^2.0.0",
+    "autoprefixer": "^10.4.27",
+    "lucide-react": "^1.7.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "tailwindcss": "^4.2.2",
     "zustand": "^4.4.7"
   },
   "devDependencies": {
