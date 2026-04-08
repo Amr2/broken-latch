@@ -18,7 +18,6 @@ use tauri::{Listener, Manager, State};
 use tauri_plugin_sql::{Builder as SqlBuilder};
 
 use overlay::{OverlayWindow, RegionManager};
-use hook::{inject_into_league, PipeMessage, PipeServer};
 use game::detect::GameDetector;
 use game::session::SessionManager;
 use hotkey::HotkeyManager;
@@ -32,8 +31,6 @@ use apps::platform_updater::{PlatformRelease, PlatformUpdater};
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
     region_manager: Mutex<RegionManager>,
-    pipe_server: Mutex<Option<PipeServer>>,
-    hook_status: Mutex<String>,
 }
 
 #[tauri::command]
@@ -95,30 +92,6 @@ async fn get_interactive_regions(state: State<'_, AppState>) -> Result<Vec<overl
     } else {
         Ok(Vec::new())
     }
-}
-
-#[tauri::command]
-async fn inject_hook() -> Result<(), String> {
-    let exe_dir = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("Failed to get exe directory")?
-        .to_path_buf();
-
-    let dll_path = exe_dir.join("broken_latch_hook.dll");
-
-    if !dll_path.exists() {
-        return Err(format!("DLL not found at {:?}", dll_path));
-    }
-
-    inject_into_league(dll_path).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn get_hook_status(state: State<'_, AppState>) -> Result<String, String> {
-    let status = state.hook_status.lock().unwrap();
-    Ok(status.clone())
 }
 
 #[tauri::command]
@@ -427,19 +400,15 @@ async fn pick_lolapp_file() -> Option<String> {
 
 #[tokio::main]
 async fn main() {
-    // Initialize logger
     env_logger::init();
 
-    // Load platform configuration
     let raw_config = config::load_config().expect("Failed to load config");
     println!("broken-latch Platform v{}", raw_config.version);
-    println!("Configuration loaded successfully");
 
     let default_opacity = raw_config.overlay.default_opacity;
     let screen_capture_visible = raw_config.overlay.screen_capture_visible;
     let config = Arc::new(Mutex::new(raw_config));
 
-    // Create shared game detector, session manager, and hotkey manager
     let detector = Arc::new(GameDetector::new());
     let session_mgr = Arc::new(SessionManager::new());
     let detector_for_loop = detector.clone();
@@ -478,10 +447,10 @@ async fn main() {
                 }
             });
 
-            // Create overlay window
+            // Create overlay window (transparent, Vanguard-safe Tauri WebviewWindow)
             let overlay = match OverlayWindow::create(app.handle()) {
                 Ok(window) => {
-                    println!("Overlay window created successfully");
+                    println!("Overlay window created");
                     if let Err(e) = window.set_opacity(default_opacity) {
                         eprintln!("Failed to set overlay opacity: {}", e);
                     }
@@ -496,11 +465,11 @@ async fn main() {
                 }
             };
 
-            // Create and register widget manager
+            // Widget manager
             let widget_manager = Arc::new(WidgetManager::new(app.handle().clone()));
             app.manage(widget_manager.clone());
 
-            // Create app registry, loader, and sandbox
+            // App lifecycle
             let app_registry = Arc::new(AppRegistry::new(app.handle().clone()));
             let app_loader = Arc::new(AppLoader::new(
                 widget_manager.clone(),
@@ -512,7 +481,7 @@ async fn main() {
             app.manage(sandbox);
             println!("App lifecycle manager initialized");
 
-            // Subscribe to game phase changes for widget auto-show/hide
+            // Auto-show/hide widgets on game phase changes
             let widget_mgr_for_phase = widget_manager.clone();
             app.listen("game_phase_changed", move |event| {
                 if let Ok(phase_event) = serde_json::from_str::<game::PhaseChangeEvent>(event.payload()) {
@@ -522,20 +491,17 @@ async fn main() {
             });
             println!("Widget manager initialized");
 
-            // Store state
             app.manage(AppState {
                 overlay: Mutex::new(overlay),
                 region_manager: Mutex::new(RegionManager::new()),
-                pipe_server: Mutex::new(None),
-                hook_status: Mutex::new("Not injected".to_string()),
             });
 
-            // Start hotkey message loop
+            // Hotkey message loop
             let app_handle_for_hotkeys = app.handle().clone();
             hotkey_manager_for_loop.start_message_loop(app_handle_for_hotkeys);
             println!("Hotkey manager started");
 
-            // Start game detection loop
+            // Game detection loop
             let app_handle_for_detector = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 println!("Starting game lifecycle detection...");
@@ -544,34 +510,7 @@ async fn main() {
                     .await;
             });
 
-            // Initialize pipe server for DLL communication
-            match PipeServer::new() {
-                Ok(server) => {
-                    println!("Named pipe server started");
-                    let server_clone = PipeServer::new().unwrap();
-                    let handle = app.handle().clone();
-                    std::thread::spawn(move || {
-                        loop {
-                            if let Some(msg) = server_clone.try_recv() {
-                                let state = handle.state::<AppState>();
-                                let status = match msg {
-                                    PipeMessage::DX11Hooked => "DirectX 11 hooked",
-                                    PipeMessage::DX12Hooked => "DirectX 12 hooked",
-                                    PipeMessage::HookFailed => "Hook failed",
-                                    PipeMessage::Custom(ref s) => s.as_str(),
-                                };
-                                *state.hook_status.lock().unwrap() = status.to_string();
-                                println!("Hook status: {}", status);
-                            }
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                        }
-                    });
-                    *app.state::<AppState>().pipe_server.lock().unwrap() = Some(server);
-                }
-                Err(e) => eprintln!("Failed to start pipe server: {}", e),
-            }
-
-            // Start HTTP API server
+            // HTTP API server
             let api_state = http_api::ApiState {
                 detector: app.state::<Arc<GameDetector>>().inner().clone(),
                 session_mgr: app.state::<Arc<SessionManager>>().inner().clone(),
@@ -586,14 +525,14 @@ async fn main() {
 
             sdk_server::log_sdk_info();
 
-            // Register registry client and platform updater
+            // Registry client + platform auto-updater
             let registry_client = Arc::new(RegistryClient::new());
             let platform_updater = Arc::new(PlatformUpdater::new());
             app.manage(registry_client);
             let updater_for_check = platform_updater.clone();
             app.manage(platform_updater);
 
-            // Background platform update check (5s after startup)
+            // Background update check 5s after startup
             let app_handle_for_update = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -608,7 +547,7 @@ async fn main() {
                 }
             });
 
-            // Set up system tray
+            // System tray
             if let Err(e) = tray::setup_tray(app.handle()) {
                 eprintln!("Failed to create system tray: {}", e);
             }
@@ -623,8 +562,6 @@ async fn main() {
             update_interactive_regions,
             set_screen_capture_visible,
             get_interactive_regions,
-            inject_hook,
-            get_hook_status,
             get_game_phase,
             get_game_session,
             register_hotkey_cmd,
@@ -644,18 +581,14 @@ async fn main() {
             start_app_cmd,
             stop_app_cmd,
             list_installed_apps_cmd,
-            // Frontend-facing aliases (no _cmd suffix)
             list_installed_apps,
             install_app,
             uninstall_app,
             start_app,
             stop_app,
-            // Platform config
             get_platform_config,
             update_platform_config,
-            // File picker
             pick_lolapp_file,
-            // Distribution / updates
             fetch_app_registry,
             download_registry_app,
             check_platform_update,
