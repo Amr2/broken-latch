@@ -1,0 +1,13 @@
+E:\project\broken-latch\.claude\worktrees\nervous-joliot\cli\target\debug\deps\aes-e4af056fcedbfac1.d: C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\lib.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\soft.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\soft\fixslice64.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\autodetect.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\utils.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes128.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes192.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes256.rs
+
+E:\project\broken-latch\.claude\worktrees\nervous-joliot\cli\target\debug\deps\libaes-e4af056fcedbfac1.rmeta: C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\lib.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\soft.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\soft\fixslice64.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\autodetect.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\utils.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes128.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes192.rs C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes256.rs
+
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\lib.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\soft.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\soft\fixslice64.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\autodetect.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\utils.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes128.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes192.rs:
+C:\Users\AAkal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\aes-0.8.4\src\ni\aes256.rs:
