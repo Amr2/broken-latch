@@ -1,0 +1,22 @@
+[package]
+name = "broken-latch-cli"
+version = "1.0.0"
+edition = "2021"
+description = "Developer CLI for the broken-latch overlay platform"
+authors = ["broken-latch team"]
+
+[[bin]]
+name = "blatch"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive", "cargo"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+colored = "2.1"
+indicatif = "0.17"
+notify = "6.1"
+zip = "2.4"
+reqwest = { version = "0.12", features = ["blocking", "json"] }

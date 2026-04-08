@@ -14,6 +14,8 @@ extern ID3D11VertexShader* g_vertexShader;
 extern ID3D11PixelShader* g_pixelShader;
 extern ID3D11SamplerState* g_samplerState;
 extern ID3D11BlendState* g_blendState;
+extern ID3D11Buffer* g_vertexBuffer;
+extern ID3D11InputLayout* g_inputLayout;
 
 // Hook initialization
 bool InitializeDX11Hook();

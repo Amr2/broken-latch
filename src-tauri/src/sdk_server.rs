@@ -1,6 +1,7 @@
-// SDK server stub
-// Full implementation in Task 09
+// SDK is served via the HTTP API server at /sdk/loloverlay.js
+// See http_api.rs → serve_sdk() handler
+// The built SDK file is embedded at compile time from sdk/dist/loloverlay.js
 
-pub fn start_sdk_server() {
-    println!("SDK server start - stub for Task 09");
+pub fn log_sdk_info() {
+    log::info!("SDK available at http://localhost:45678/sdk/loloverlay.js");
 }

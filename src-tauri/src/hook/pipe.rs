@@ -55,7 +55,7 @@ fn run_pipe_server(tx: Sender<PipeMessage>) -> Result<(), Box<dyn std::error::Er
                 PCWSTR(pipe_name_wide.as_ptr()),
                 PIPE_ACCESS_INBOUND,
                 PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-                1, // Max instances
+                PIPE_UNLIMITED_INSTANCES,
                 BUFFER_SIZE,
                 BUFFER_SIZE,
                 0,
@@ -67,8 +67,11 @@ fn run_pipe_server(tx: Sender<PipeMessage>) -> Result<(), Box<dyn std::error::Er
             }
 
             // Wait for client connection
-            let connected = ConnectNamedPipe(h_pipe, None).is_ok()
-                || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
+            // ERROR_PIPE_CONNECTED means a client was already waiting before we called ConnectNamedPipe
+            let connected = match ConnectNamedPipe(h_pipe, None) {
+                Ok(()) => true,
+                Err(e) => e.code() == windows::core::HRESULT::from_win32(ERROR_PIPE_CONNECTED.0),
+            };
 
             if connected {
                 // Read message from pipe
@@ -96,10 +99,10 @@ fn run_pipe_server(tx: Sender<PipeMessage>) -> Result<(), Box<dyn std::error::Er
                     let _ = tx.send(pipe_msg);
                 }
 
-                DisconnectNamedPipe(h_pipe);
+                let _ = DisconnectNamedPipe(h_pipe);
             }
 
-            CloseHandle(h_pipe);
+            let _ = CloseHandle(h_pipe);
         }
     }
 }

@@ -13,12 +13,21 @@ mod db;
 mod tray;
 mod config;
 
-use std::sync::Mutex;
-use tauri::{Manager, State};
+use std::sync::{Arc, Mutex};
+use tauri::{Listener, Manager, State};
 use tauri_plugin_sql::{Builder as SqlBuilder};
 
 use overlay::{OverlayWindow, RegionManager};
 use hook::{inject_into_league, PipeMessage, PipeServer};
+use game::detect::GameDetector;
+use game::session::SessionManager;
+use hotkey::HotkeyManager;
+use widgets::WidgetManager;
+use apps::registry::AppRegistry;
+use apps::loader::AppLoader;
+use apps::sandbox::PermissionSandbox;
+use apps::updater::{AppRegistry as RemoteAppRegistry, RegistryClient};
+use apps::platform_updater::{PlatformRelease, PlatformUpdater};
 
 struct AppState {
     overlay: Mutex<Option<OverlayWindow>>,
@@ -90,12 +99,11 @@ async fn get_interactive_regions(state: State<'_, AppState>) -> Result<Vec<overl
 
 #[tauri::command]
 async fn inject_hook() -> Result<(), String> {
-    // Get DLL path from executable directory
     let exe_dir = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .parent()
-        .ok_or("Failed to get exe directory")?.
-        to_path_buf();
+        .ok_or("Failed to get exe directory")?
+        .to_path_buf();
 
     let dll_path = exe_dir.join("broken_latch_hook.dll");
 
@@ -113,23 +121,355 @@ async fn get_hook_status(state: State<'_, AppState>) -> Result<String, String> {
     Ok(status.clone())
 }
 
+#[tauri::command]
+async fn get_game_phase(
+    detector: State<'_, Arc<GameDetector>>,
+) -> Result<game::GamePhase, String> {
+    Ok(detector.get_current_phase())
+}
+
+#[tauri::command]
+async fn get_game_session(
+    session_mgr: State<'_, Arc<SessionManager>>,
+) -> Result<Option<game::GameSession>, String> {
+    Ok(session_mgr.get_current_session())
+}
+
+#[tauri::command]
+async fn register_hotkey_cmd(
+    app_id: String,
+    hotkey_id: String,
+    keys: String,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<i32, String> {
+    manager
+        .register(&app_id, &hotkey_id, &keys)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn unregister_hotkey_cmd(
+    win_hotkey_id: i32,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<(), String> {
+    manager
+        .unregister(win_hotkey_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn is_hotkey_registered(
+    keys: String,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<bool, String> {
+    Ok(manager.is_hotkey_taken(&keys))
+}
+
+#[tauri::command]
+async fn get_app_hotkeys(
+    app_id: String,
+    manager: State<'_, Arc<HotkeyManager>>,
+) -> Result<Vec<hotkey::HotkeyRegistration>, String> {
+    Ok(manager.get_hotkeys_for_app(&app_id))
+}
+
+#[tauri::command]
+async fn create_widget_cmd(
+    config: widgets::WidgetConfig,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<String, String> {
+    manager.create_widget(config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn show_widget_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager.show_widget(&widget_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn hide_widget_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager.hide_widget(&widget_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_widget_opacity_cmd(
+    widget_id: String,
+    opacity: f32,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .set_widget_opacity(&widget_id, opacity)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_widget_position_cmd(
+    widget_id: String,
+    position: widgets::Position,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .set_widget_position(&widget_id, position)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_widget_click_through_cmd(
+    widget_id: String,
+    enabled: bool,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .set_click_through(&widget_id, enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_widget_state_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<widgets::WidgetState, String> {
+    manager.get_state(&widget_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn destroy_widget_cmd(
+    widget_id: String,
+    manager: State<'_, Arc<WidgetManager>>,
+) -> Result<(), String> {
+    manager
+        .destroy_widget(&widget_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn install_app_cmd(
+    lolapp_path: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<String, String> {
+    registry
+        .install_app(std::path::PathBuf::from(lolapp_path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn uninstall_app_cmd(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<(), String> {
+    registry.uninstall_app(&app_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_app_cmd(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    let app = registry.get_app(&app_id).map_err(|e| e.to_string())?;
+    loader.start_app(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stop_app_cmd(
+    app_id: String,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    loader.stop_app(&app_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_installed_apps_cmd(
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<Vec<apps::InstalledApp>, String> {
+    registry.list_apps().map_err(|e| e.to_string())
+}
+
+// ── Frontend-facing commands (no _cmd suffix) ────────────────────────────────
+
+#[tauri::command]
+async fn list_installed_apps(
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<Vec<apps::InstalledApp>, String> {
+    registry.list_apps().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn install_app(
+    lolapp_path: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<String, String> {
+    registry
+        .install_app(std::path::PathBuf::from(lolapp_path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn uninstall_app(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+) -> Result<(), String> {
+    registry.uninstall_app(&app_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_app(
+    app_id: String,
+    registry: State<'_, Arc<AppRegistry>>,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    let app = registry.get_app(&app_id).map_err(|e| e.to_string())?;
+    loader.start_app(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn stop_app(
+    app_id: String,
+    loader: State<'_, Arc<AppLoader>>,
+) -> Result<(), String> {
+    loader.stop_app(&app_id).map_err(|e| e.to_string())
+}
+
+// ── Platform config commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_platform_config(
+    config: State<'_, Arc<Mutex<config::PlatformConfig>>>,
+) -> Result<config::PlatformConfig, String> {
+    Ok(config.lock().unwrap().clone())
+}
+
+#[tauri::command]
+async fn update_platform_config(
+    config_state: State<'_, Arc<Mutex<config::PlatformConfig>>>,
+    config: config::PlatformConfig,
+) -> Result<(), String> {
+    *config_state.lock().unwrap() = config.clone();
+    config::save_config(&config).map_err(|e| e.to_string())
+}
+
+// ── Distribution / update commands ───────────────────────────────────────────
+
+#[tauri::command]
+async fn fetch_app_registry(
+    registry_client: State<'_, Arc<RegistryClient>>,
+) -> Result<RemoteAppRegistry, String> {
+    registry_client.fetch_registry().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_registry_app(
+    app_id: String,
+    registry_client: State<'_, Arc<RegistryClient>>,
+) -> Result<String, String> {
+    let registry = registry_client.fetch_registry().await.map_err(|e| e.to_string())?;
+    let entry = registry
+        .apps
+        .iter()
+        .find(|a| a.id == app_id)
+        .ok_or_else(|| "App not found in registry".to_string())?;
+    let temp_path = std::env::temp_dir().join(format!("{}.lolapp", app_id));
+    registry_client
+        .download_app(entry, temp_path.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(temp_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn check_platform_update(
+    platform_updater: State<'_, Arc<PlatformUpdater>>,
+) -> Result<Option<PlatformRelease>, String> {
+    platform_updater.check_for_update().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_platform_update(
+    platform_updater: State<'_, Arc<PlatformUpdater>>,
+    release: PlatformRelease,
+) -> Result<String, String> {
+    let path = platform_updater
+        .download_update(&release)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn apply_platform_update(
+    platform_updater: State<'_, Arc<PlatformUpdater>>,
+    installer_path: String,
+) -> Result<(), String> {
+    platform_updater
+        .apply_update(std::path::PathBuf::from(installer_path))
+        .map_err(|e| e.to_string())
+}
+
+// ── File picker ───────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn pick_lolapp_file() -> Option<String> {
+    use rfd::FileDialog;
+    FileDialog::new()
+        .add_filter("broken-latch App", &["lolapp"])
+        .set_title("Select a .lolapp file")
+        .pick_file()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 #[tokio::main]
 async fn main() {
+    // Initialize logger
+    env_logger::init();
+
     // Load platform configuration
-    let config = config::load_config().expect("Failed to load config");
-    println!("broken-latch Platform v{}", config.version);
+    let raw_config = config::load_config().expect("Failed to load config");
+    println!("broken-latch Platform v{}", raw_config.version);
     println!("Configuration loaded successfully");
 
-    // Initialize Tauri app
+    let default_opacity = raw_config.overlay.default_opacity;
+    let screen_capture_visible = raw_config.overlay.screen_capture_visible;
+    let config = Arc::new(Mutex::new(raw_config));
+
+    // Create shared game detector, session manager, and hotkey manager
+    let detector = Arc::new(GameDetector::new());
+    let session_mgr = Arc::new(SessionManager::new());
+    let detector_for_loop = detector.clone();
+
+    let hotkey_manager = Arc::new(
+        HotkeyManager::new().expect("Failed to create hotkey manager"),
+    );
+    let hotkey_manager_for_loop = hotkey_manager.clone();
+
     tauri::Builder::default()
         .plugin(
             SqlBuilder::default()
                 .add_migrations("sqlite:platform.db", db::get_migrations())
                 .build(),
         )
-        .setup(|app| {
+        .manage(detector)
+        .manage(session_mgr)
+        .manage(hotkey_manager)
+        .manage(config)
+        .setup(move |app| {
             println!("Platform initializing...");
-            
+
+            #[cfg(debug_assertions)]
+            {
+                use tauri::Manager;
+                if let Some(win) = app.get_webview_window("main") {
+                    win.open_devtools();
+                }
+            }
+
             // Initialize database
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -142,19 +482,12 @@ async fn main() {
             let overlay = match OverlayWindow::create(app.handle()) {
                 Ok(window) => {
                     println!("Overlay window created successfully");
-                    
-                    // Apply default opacity from config
-                    let opacity = config.overlay.default_opacity;
-                    if let Err(e) = window.set_opacity(opacity) {
+                    if let Err(e) = window.set_opacity(default_opacity) {
                         eprintln!("Failed to set overlay opacity: {}", e);
                     }
-                    
-                    // Apply screen capture setting from config
-                    let capture_visible = config.overlay.screen_capture_visible;
-                    if let Err(e) = window.set_screen_capture_visible(capture_visible) {
+                    if let Err(e) = window.set_screen_capture_visible(screen_capture_visible) {
                         eprintln!("Failed to set screen capture visibility: {}", e);
                     }
-                    
                     Some(window)
                 }
                 Err(e) => {
@@ -162,6 +495,32 @@ async fn main() {
                     None
                 }
             };
+
+            // Create and register widget manager
+            let widget_manager = Arc::new(WidgetManager::new(app.handle().clone()));
+            app.manage(widget_manager.clone());
+
+            // Create app registry, loader, and sandbox
+            let app_registry = Arc::new(AppRegistry::new(app.handle().clone()));
+            let app_loader = Arc::new(AppLoader::new(
+                widget_manager.clone(),
+                hotkey_manager_for_loop.clone(),
+            ));
+            let sandbox = Arc::new(std::sync::Mutex::new(PermissionSandbox::new()));
+            app.manage(app_registry);
+            app.manage(app_loader);
+            app.manage(sandbox);
+            println!("App lifecycle manager initialized");
+
+            // Subscribe to game phase changes for widget auto-show/hide
+            let widget_mgr_for_phase = widget_manager.clone();
+            app.listen("game_phase_changed", move |event| {
+                if let Ok(phase_event) = serde_json::from_str::<game::PhaseChangeEvent>(event.payload()) {
+                    let phase_str = format!("{:?}", phase_event.current);
+                    widget_mgr_for_phase.handle_phase_change(&phase_str);
+                }
+            });
+            println!("Widget manager initialized");
 
             // Store state
             app.manage(AppState {
@@ -171,12 +530,24 @@ async fn main() {
                 hook_status: Mutex::new("Not injected".to_string()),
             });
 
+            // Start hotkey message loop
+            let app_handle_for_hotkeys = app.handle().clone();
+            hotkey_manager_for_loop.start_message_loop(app_handle_for_hotkeys);
+            println!("Hotkey manager started");
+
+            // Start game detection loop
+            let app_handle_for_detector = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                println!("Starting game lifecycle detection...");
+                detector_for_loop
+                    .start_detection_loop(app_handle_for_detector)
+                    .await;
+            });
+
             // Initialize pipe server for DLL communication
             match PipeServer::new() {
                 Ok(server) => {
                     println!("Named pipe server started");
-                    
-                    // Store pipe server in state and monitor it
                     let server_clone = PipeServer::new().unwrap();
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
@@ -195,10 +566,51 @@ async fn main() {
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     });
-                    
                     *app.state::<AppState>().pipe_server.lock().unwrap() = Some(server);
                 }
                 Err(e) => eprintln!("Failed to start pipe server: {}", e),
+            }
+
+            // Start HTTP API server
+            let api_state = http_api::ApiState {
+                detector: app.state::<Arc<GameDetector>>().inner().clone(),
+                session_mgr: app.state::<Arc<SessionManager>>().inner().clone(),
+                hotkey_manager: app.state::<Arc<HotkeyManager>>().inner().clone(),
+                widget_manager: widget_manager.clone(),
+            };
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = http_api::start_api_server(api_state).await {
+                    eprintln!("HTTP API server failed: {}", e);
+                }
+            });
+
+            sdk_server::log_sdk_info();
+
+            // Register registry client and platform updater
+            let registry_client = Arc::new(RegistryClient::new());
+            let platform_updater = Arc::new(PlatformUpdater::new());
+            app.manage(registry_client);
+            let updater_for_check = platform_updater.clone();
+            app.manage(platform_updater);
+
+            // Background platform update check (5s after startup)
+            let app_handle_for_update = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                match updater_for_check.check_for_update().await {
+                    Ok(Some(release)) => {
+                        log::info!("Platform update available: v{}", release.version);
+                        use tauri::Emitter;
+                        app_handle_for_update.emit("platform_update_available", &release).ok();
+                    }
+                    Ok(None) => log::info!("Platform is up to date"),
+                    Err(e) => log::warn!("Failed to check for updates: {}", e),
+                }
+            });
+
+            // Set up system tray
+            if let Err(e) = tray::setup_tray(app.handle()) {
+                eprintln!("Failed to create system tray: {}", e);
             }
 
             println!("Platform ready!");
@@ -213,6 +625,42 @@ async fn main() {
             get_interactive_regions,
             inject_hook,
             get_hook_status,
+            get_game_phase,
+            get_game_session,
+            register_hotkey_cmd,
+            unregister_hotkey_cmd,
+            is_hotkey_registered,
+            get_app_hotkeys,
+            create_widget_cmd,
+            show_widget_cmd,
+            hide_widget_cmd,
+            set_widget_opacity_cmd,
+            set_widget_position_cmd,
+            set_widget_click_through_cmd,
+            get_widget_state_cmd,
+            destroy_widget_cmd,
+            install_app_cmd,
+            uninstall_app_cmd,
+            start_app_cmd,
+            stop_app_cmd,
+            list_installed_apps_cmd,
+            // Frontend-facing aliases (no _cmd suffix)
+            list_installed_apps,
+            install_app,
+            uninstall_app,
+            start_app,
+            stop_app,
+            // Platform config
+            get_platform_config,
+            update_platform_config,
+            // File picker
+            pick_lolapp_file,
+            // Distribution / updates
+            fetch_app_registry,
+            download_registry_app,
+            check_platform_update,
+            download_platform_update,
+            apply_platform_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
