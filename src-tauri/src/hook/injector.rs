@@ -25,7 +25,7 @@ impl DllInjector {
             .processes()
             .iter()
             .find(|(_, p)| {
-                let name = p.name().to_string_lossy();
+                let name = p.name().to_string();
                 name == "LeagueOfLegends.exe" || name == "League of Legends.exe"
             })
             .map(|(pid, _)| pid.as_u32())

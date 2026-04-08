@@ -1,0 +1,702 @@
+/*
+ * stages.css — Shared styles for all game stage overlay components
+ *
+ * These styles apply to widget panels rendered inside the transparent overlay
+ * window. All positioning is absolute, referencing the 1920×1080 game canvas.
+ *
+ * DEVELOPER NOTE:
+ *   When building your own app widgets on this platform, follow these patterns:
+ *   1. Use .widget-panel as your root container (from OverlayApp.css)
+ *   2. Apply pointer-events: auto only to interactive areas
+ *   3. Use semantic class names; the platform does not scope styles automatically
+ *   4. Prefer rem/px sizing over % (% of fullscreen can be unpredictable)
+ */
+
+/* ── Common layout helpers ──────────────────────────────────────────────── */
+
+.section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(255, 255, 255, 0.3);
+  margin: 8px 0 4px;
+}
+
+.dev-note {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 4px;
+  font-size: 10px;
+  color: rgba(167, 139, 250, 0.8);
+  line-height: 1.5;
+}
+
+.dev-note code {
+  background: rgba(99, 102, 241, 0.2);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  color: #a78bfa;
+}
+
+.dismiss-btn,
+.minimize-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s;
+}
+
+.dismiss-btn:hover, .minimize-btn:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* ── Color helpers ──────────────────────────────────────────────────────── */
+
+.green { color: #22c55e; }
+.red   { color: #ef4444; }
+.blue  { color: #60a5fa; }
+
+.stat-name {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.stat-dim {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* ── LAUNCHING stage ────────────────────────────────────────────────────── */
+
+.launch-body {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.launch-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+  line-height: 1;
+  padding-top: 4px;
+}
+
+.launch-info {
+  flex: 1;
+}
+
+.launch-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.launch-subtitle {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 8px;
+  font-family: 'Cascadia Code', monospace;
+}
+
+.launch-progress {
+  margin-bottom: 8px;
+}
+
+.progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 3px;
+}
+
+.progress-fill.launching {
+  height: 100%;
+  width: 75%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 4px;
+  animation: pulse-bar 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-bar {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.progress-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.launch-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.step span { font-size: 12px; }
+.step.done   { color: #22c55e; }
+.step.active { color: #f59e0b; }
+
+/* ── IN_LOBBY stage ─────────────────────────────────────────────────────── */
+
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rank-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #b45309, #78350f);
+  border-radius: 8px;
+  border: 2px solid #f59e0b;
+  flex-shrink: 0;
+}
+
+.rank-tier {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #fbbf24;
+}
+
+.rank-div {
+  font-size: 14px;
+  font-weight: 800;
+  color: #fef3c7;
+  line-height: 1;
+}
+
+.rank-detail {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.match-row {
+  display: grid;
+  grid-template-columns: 18px 70px 60px 45px auto;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.match-result {
+  font-weight: 800;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  font-size: 9px;
+}
+
+.match-result.win  { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+.match-result.loss { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+.match-champ { font-weight: 600; }
+.match-kda   { font-family: monospace; font-size: 10px; color: rgba(255,255,255,0.7); }
+.match-cs    { color: rgba(255,255,255,0.4); font-size: 10px; }
+.match-dur   { color: rgba(255,255,255,0.3); font-size: 10px; }
+
+.queue-body  { text-align: center; }
+
+.queue-searching {
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 4px;
+}
+
+.queue-timer {
+  font-family: 'Cascadia Code', monospace;
+  font-size: 32px;
+  font-weight: 700;
+  color: #22c55e;
+  line-height: 1;
+}
+
+.queue-est {
+  font-size: 11px;
+  color: rgba(255,255,255,0.3);
+  margin: 4px 0 8px;
+}
+
+.queue-idle {
+  font-size: 12px;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 8px;
+}
+
+.queue-btn {
+  width: 100%;
+  padding: 7px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  margin-bottom: 8px;
+  transition: all 0.1s;
+}
+
+.queue-btn.start  { background: rgba(34,197,94,0.25); color: #22c55e;  border: 1px solid rgba(34,197,94,0.4);  }
+.queue-btn.cancel { background: rgba(239,68,68,0.25);  color: #ef4444; border: 1px solid rgba(239,68,68,0.4); }
+.queue-btn:hover  { filter: brightness(1.2); }
+
+/* ── CHAMP_SELECT stage ─────────────────────────────────────────────────── */
+
+.cs-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  margin-bottom: 3px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.cs-player.is-you {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.cs-player.locked .cs-champ-name { color: #22c55e; }
+
+.cs-role { font-size: 14px; }
+
+.cs-champ-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cs-champ-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cs-suggestion {
+  font-size: 10px;
+  color: #f59e0b;
+}
+
+.cs-locked {
+  font-size: 10px;
+  color: #22c55e;
+  font-weight: 700;
+}
+
+.bans-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ban-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: 4px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+}
+
+.hotkey-demo {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.key {
+  padding: 2px 6px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.key-sep  { color: rgba(255,255,255,0.3); font-size: 10px; }
+.key-label { font-size: 11px; color: rgba(255,255,255,0.5); margin-left: 4px; }
+
+.phase-timer .timer-display {
+  font-size: 36px;
+  font-family: 'Cascadia Code', monospace;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── LOADING stage ──────────────────────────────────────────────────────── */
+
+.loading-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loading-teams {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.loading-team {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.loading-team.blue { align-items: flex-end; }
+.loading-team.red  { align-items: flex-start; }
+
+.loading-champ {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+}
+
+.loading-champ.is-you {
+  background: rgba(99,102,241,0.2);
+  border: 1px solid rgba(99,102,241,0.4);
+  color: #a78bfa;
+  font-weight: 700;
+}
+
+.loading-vs {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+
+.loading-progress-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.loading-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #22c55e);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.loading-tip {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.tip-icon { font-size: 16px; flex-shrink: 0; }
+.tip-text { font-size: 12px; color: rgba(255,255,255,0.7); line-height: 1.5; }
+
+/* ── IN_GAME stage ──────────────────────────────────────────────────────── */
+
+.ingame-kda {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 0 8px;
+}
+
+.kda-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.kda-num {
+  font-family: 'Cascadia Code', monospace;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.kda-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.3);
+  letter-spacing: 0.5px;
+}
+
+.kda-sep {
+  font-size: 18px;
+  color: rgba(255,255,255,0.2);
+  margin-bottom: 12px;
+}
+
+.ingame-stats {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.stat-chip {
+  flex: 1;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.stat-chip-val {
+  display: block;
+  font-family: 'Cascadia Code', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stat-chip-label {
+  font-size: 9px;
+  color: rgba(255,255,255,0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.item-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.item-chip {
+  width: 28px;
+  height: 28px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: default;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.cd-row { margin-bottom: 4px; }
+
+.cd-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  transition: all 0.1s;
+}
+
+.cd-btn:hover { background: rgba(255,255,255,0.08); }
+
+.cd-key {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 1px 5px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.cd-spell { flex: 1; font-size: 11px; text-align: left; }
+.cd-time  { font-family: monospace; font-size: 12px; font-weight: 700; }
+
+.timer-display {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.timer-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(255,255,255,0.3);
+  margin-top: 3px;
+}
+
+/* ── END_GAME stage ─────────────────────────────────────────────────────── */
+
+.endgame-hero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.hero-champ {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.hero-kda {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.hero-kda .kda-num { font-size: 18px; }
+.hero-kda .kda-sep { margin-bottom: 0; }
+
+.mvp-badge {
+  margin-left: auto;
+  padding: 3px 8px;
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.endgame-stats {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.stat-cell {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border-radius: 5px;
+  padding: 6px 4px;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.stat-cell-val {
+  font-family: 'Cascadia Code', monospace;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.stat-cell-label {
+  font-size: 9px;
+  color: rgba(255,255,255,0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge.orange { background: rgba(249,115,22,0.2); color: #fb923c; border: 1px solid rgba(249,115,22,0.3); }
+.badge.gold   { background: rgba(245,158,11,0.2);  color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+.badge.blue   { background: rgba(59,130,246,0.2);  color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+
+.scoreboard {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.scoreboard th {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.3);
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  text-align: left;
+}
+
+.scoreboard td {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.7);
+}
+
+.scoreboard .highlight-row td {
+  color: #e8e8f0;
+  background: rgba(99,102,241,0.08);
+  font-weight: 600;
+}
+
+.endgame-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ctrl-btn {
+  padding: 6px 14px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 5px;
+  color: rgba(255,255,255,0.8);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.1s;
+  font-family: inherit;
+}
+
+.ctrl-btn:hover { background: rgba(255,255,255,0.1); }
+.ctrl-btn.green { border-color: rgba(34,197,94,0.4); color: #22c55e; }
+.ctrl-btn.red   { border-color: rgba(239,68,68,0.4); color: #ef4444; }

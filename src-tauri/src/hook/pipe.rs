@@ -66,9 +66,16 @@ fn run_pipe_server(tx: Sender<PipeMessage>) -> Result<(), Box<dyn std::error::Er
                 return Err("Failed to create named pipe".into());
             }
 
-            // Wait for client connection
-            let connected = ConnectNamedPipe(h_pipe, None).is_ok()
-                || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
+            // Wait for client connection.
+            // ConnectNamedPipe returns Ok when a new client connects.
+            // It returns Err(ERROR_PIPE_CONNECTED) when a client was already
+            // connected before we called it — that is also a valid connection.
+            // HRESULT 0x80070217 = HRESULT_FROM_WIN32(ERROR_PIPE_CONNECTED = 535).
+            const HRESULT_PIPE_CONNECTED: i32 = 0x80070217_u32 as i32;
+            let connected = match ConnectNamedPipe(h_pipe, None) {
+                Ok(_)  => true,
+                Err(e) => e.code().0 == HRESULT_PIPE_CONNECTED,
+            };
 
             if connected {
                 // Read message from pipe

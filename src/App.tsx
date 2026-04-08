@@ -1,18 +1,11 @@
-import React from 'react';
+/**
+ * App.tsx — Main window root component
+ * =====================================
+ * The main Tauri window renders the Dev Simulator dashboard.
+ * In production this would be the platform control panel / system tray UI.
+ */
+import DevDashboard from './components/DevDashboard/DevDashboard';
 
-function App() {
-  return (
-    <div className="app-container">
-      <div className="status-card">
-        <h1 className="title">broken-latch Platform</h1>
-        <p className="status-message">Initialization successful</p>
-        <div className="info-section">
-          <p>Platform Version: 0.1.0</p>
-          <p>Framework: Tauri 2.0 + React</p>
-        </div>
-      </div>
-    </div>
-  );
+export default function App() {
+  return <DevDashboard />;
 }
-
-export default App;

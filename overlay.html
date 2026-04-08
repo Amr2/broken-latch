@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!--
+  overlay.html — broken-latch Transparent Overlay Window
+  =======================================================
+  This HTML file is loaded by the SECOND Tauri window: the transparent,
+  fullscreen overlay that sits on top of League of Legends.
+
+  Window properties (set in Rust via WindowBuilder):
+    transparent:    true   — background is fully transparent
+    decorations:    false  — no title bar or window chrome
+    always_on_top:  true   — stays above the game
+    skip_taskbar:   true   — hidden from taskbar
+    fullscreen:     true   — covers the entire primary monitor
+
+  Win32 styles applied after creation (overlay/window.rs):
+    WS_EX_LAYERED      — enables per-pixel alpha and opacity control
+    WS_EX_TRANSPARENT  — default click-through (passes input to game)
+    WS_EX_TOPMOST      — z-order above all other windows
+    WDA_EXCLUDEFROMCAPTURE — hidden from OBS/Discord screen capture
+
+  Interactive regions:
+    Specific Rect areas can be made interactive via `update_interactive_regions`.
+    Everything outside those rects remains click-through.
+
+  React entry: src/overlay.tsx → OverlayApp component
+    Listens for the `phase-changed` Tauri event and swaps the active
+    stage component accordingly.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>broken-latch Overlay</title>
+    <style>
+      /* Reset — must be zero margin/padding to avoid white edges */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      /* Transparent body — the Tauri window handles actual transparency */
+      html, body {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background: transparent;
+
+        /*
+          pointer-events: none makes the entire window click-through by default.
+          Individual widget panels override this with pointer-events: auto.
+          The platform also calls SetWindowRgn() on the Win32 side to define
+          the interactive region at the OS level.
+        */
+        pointer-events: none;
+      }
+
+      #overlay-root {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay-root"></div>
+    <!--
+      React entry point — Vite replaces this with a bundled script in production.
+      In dev mode, Vite's HMR keeps the overlay hot-reloading alongside the dashboard.
+    -->
+    <script type="module" src="/src/overlay.tsx"></script>
+  </body>
+</html>

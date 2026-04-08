@@ -1,0 +1,112 @@
+/*
+ * OverlayApp.css — Transparent overlay window root styles
+ *
+ * The entire overlay is a transparent canvas.
+ * pointer-events: none ensures all mouse input passes through to the game
+ * unless a widget panel explicitly sets pointer-events: auto.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.overlay-root {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+
+  /* Click-through by default — game receives all input */
+  pointer-events: none;
+
+  /* Transparent so game renders beneath */
+  background: transparent;
+}
+
+/*
+ * Widget container base class.
+ * Each stage component's interactive panels should include these properties.
+ * Developers building apps on this platform follow the same pattern.
+ *
+ * Example usage:
+ *   <div className="widget-panel" style={{ top: 10, right: 10, width: 220 }}>
+ *     content here
+ *   </div>
+ */
+.widget-panel {
+  position: absolute;
+  pointer-events: auto;       /* This area captures mouse input */
+
+  background: rgba(10, 10, 15, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #e8e8f0;
+  font-family: -apple-system, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  backdrop-filter: blur(4px);
+  overflow: hidden;
+}
+
+/* Widget header bar */
+.widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.widget-body {
+  padding: 10px;
+}
+
+/* Monospaced values displayed in widgets */
+.widget-value {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: #e8e8f0;
+}
+
+.widget-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 2px;
+}
+
+/* Developer badge shown on all demo widgets */
+.demo-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 9px;
+  padding: 1px 5px;
+  background: rgba(99, 102, 241, 0.3);
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  border-radius: 10px;
+  color: #a78bfa;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+}
+
+/* Fade-in animation for widget appearance */
+@keyframes widget-enter {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.widget-panel {
+  animation: widget-enter 0.2s ease-out;
+}

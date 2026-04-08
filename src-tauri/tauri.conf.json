@@ -31,11 +31,15 @@
   "app": {
     "windows": [
       {
-        "title": "broken-latch",
-        "width": 1,
-        "height": 1,
-        "visible": false,
-        "skipTaskbar": true
+        "title": "broken-latch Dev Simulator",
+        "width": 1200,
+        "height": 720,
+        "minWidth": 1000,
+        "minHeight": 600,
+        "visible": true,
+        "skipTaskbar": false,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {
