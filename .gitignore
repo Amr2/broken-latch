@@ -87,6 +87,10 @@ desktop.ini
 Cargo.lock
 **/*.rs.bk
 
+.vitepress/dist/**
+.vitepress/cache/**
+**/.vitepress/dist/**
+**/.vitepress/cache/**
 # MinHook library (downloaded externally)
 overlay-hook/lib/MinHook.*
 overlay-hook/include/MinHook.h
@@ -110,3 +114,4 @@ coverage/
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
+cli/target/
