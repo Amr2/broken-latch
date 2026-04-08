@@ -48,7 +48,22 @@ impl OverlayWindow {
     }
 
     /// Create and configure the transparent fullscreen overlay window.
+    ///
+    /// NOTE on `always_on_top` / `fullscreen` in the Tauri builder:
+    ///   We set these to `false` here and apply the Win32 `WS_EX_TOPMOST` style
+    ///   directly via `SetWindowPos(HWND_TOPMOST)` in `apply_overlay_styles`.
+    ///   This avoids the Tauri builder applying TOPMOST *before* the window is
+    ///   fully created, which can interfere with the Dev Simulator window focus.
+    ///   In production the window is also sized to the screen via Win32 after creation.
     pub fn create(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
+        // Get primary monitor dimensions so we can size the overlay correctly
+        let (screen_w, screen_h) = unsafe {
+            (
+                GetSystemMetrics(SM_CXSCREEN),
+                GetSystemMetrics(SM_CYSCREEN),
+            )
+        };
+
         let window = tauri::WebviewWindowBuilder::new(
             app,
             "overlay",
@@ -56,9 +71,10 @@ impl OverlayWindow {
         )
         .transparent(true)
         .decorations(false)
-        .always_on_top(true)
+        .always_on_top(false)   // Applied via Win32 SetWindowPos below
         .skip_taskbar(true)
-        .fullscreen(true)
+        .inner_size(screen_w as f64, screen_h as f64)
+        .position(0.0, 0.0)
         .visible(false)
         .build()?;
 
@@ -75,25 +91,24 @@ impl OverlayWindow {
         })
     }
 
-    /// Apply Win32 extended styles: layered, transparent, topmost, no-capture.
+    /// Apply Win32 extended styles for overlay behaviour.
+    ///
+    /// We do NOT apply WS_EX_TOPMOST / HWND_TOPMOST here on purpose.
+    /// The overlay must NOT cover the Dev Simulator window while it is open.
+    /// When deployed in production (over a real game), the integrating code
+    /// would call SetWindowPos(HWND_TOPMOST) after detecting the game window.
     fn apply_overlay_styles(hwnd: HWND) -> Result<(), Box<dyn std::error::Error>> {
         unsafe {
             let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            // WS_EX_LAYERED    — required for SetLayeredWindowAttributes (opacity)
+            // WS_EX_TRANSPARENT — click-through by default
             let new_style = ex_style
                 | (WS_EX_LAYERED.0 as i32)
-                | (WS_EX_TRANSPARENT.0 as i32)
-                | (WS_EX_TOPMOST.0 as i32);
+                | (WS_EX_TRANSPARENT.0 as i32);
             SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
 
+            // Hide from OBS / Discord / Windows Game Bar screen capture
             SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)?;
-
-            // windows 0.61: hwndInsertAfter is Option<HWND>
-            SetWindowPos(
-                hwnd,
-                Some(HWND_TOPMOST),
-                0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )?;
         }
         Ok(())
     }

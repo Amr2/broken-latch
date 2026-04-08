@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/capabilities.json",
+  "identifier": "overlay",
+  "description": "Capabilities for the transparent overlay window.\n\nThe overlay window only needs to receive events (phase-changed)\nand potentially call a small subset of commands.",
+  "windows": ["overlay"],
+  "permissions": [
+    "core:default"
+  ]
+}

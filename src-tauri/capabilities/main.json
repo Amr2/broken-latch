@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/capabilities.json",
+  "identifier": "main",
+  "description": "Capabilities for the Dev Simulator dashboard window (main).\n\nIn Tauri 2.0 every window must be granted explicit permissions.\n'core:default' allows the window to call invoke(), listen to events,\nand use the core window APIs.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "sql:allow-load",
+    "sql:allow-execute",
+    "sql:allow-select",
+    "sql:allow-close"
+  ]
+}

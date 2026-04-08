@@ -173,6 +173,7 @@ export default function DevDashboard() {
   const [activeRegions, setActiveRegions]       = useState<Rect[]>([]);
   const [config, setConfig]                     = useState<PlatformConfig | null>(null);
   const [log, setLog]                           = useState<LogEntry[]>([]);
+  const [ipcReady, setIpcReady]                 = useState<boolean | null>(null); // null=checking, true=ok, false=error
   const logRef                                  = useRef<HTMLDivElement>(null);
 
   // Scroll event log to bottom on new entry
@@ -189,15 +190,19 @@ export default function DevDashboard() {
   // ── On mount: load config, subscribe to events ──────────────────────────
 
   useEffect(() => {
-    // Load the TOML config that was parsed at Rust startup
+    // Probe IPC immediately — this tells us if Tauri capabilities are working
     invoke<PlatformConfig>('get_platform_config')
       .then(cfg => {
         setConfig(cfg);
+        setIpcReady(true);
         setOpacity(cfg.overlay.default_opacity);
         setCaptureVisible(cfg.overlay.screen_capture_visible);
-        addLog('system', `Config loaded — v${cfg.version}, opacity ${cfg.overlay.default_opacity}`);
+        addLog('system', `IPC ready · config loaded (v${cfg.version})`);
       })
-      .catch(err => addLog('error', `get_platform_config failed: ${err}`));
+      .catch(err => {
+        setIpcReady(false);
+        addLog('error', `IPC NOT available: ${String(err)} — check capabilities config`);
+      });
 
     // Load current phase (in case the app was re-opened mid-game)
     invoke<string>('get_current_phase')
@@ -222,19 +227,21 @@ export default function DevDashboard() {
   // ── Phase simulation ─────────────────────────────────────────────────────
 
   const simulatePhase = async (phase: GamePhase) => {
+    // Optimistic update — UI responds immediately regardless of IPC result
+    setCurrentPhase(phase);
+    setOverlayVisible(PHASES[phase].overlayShown);
+    setActiveRegions(DEMO_REGIONS[phase]);
+    addLog('command', `simulate_phase("${phase}")`);
+
     try {
-      addLog('command', `invoke simulate_phase("${phase}")`);
       await invoke('simulate_phase', { phase });
-      setCurrentPhase(phase);
-      setOverlayVisible(PHASES[phase].overlayShown);
 
       // Register demo interactive regions for this phase
       const regions = DEMO_REGIONS[phase];
       await invoke('update_interactive_regions', { regions });
-      setActiveRegions(regions);
-      addLog('command', `update_interactive_regions → ${regions.length} region(s)`);
+      addLog('system', `overlay ${PHASES[phase].overlayShown ? 'shown' : 'hidden'} · ${regions.length} interactive region(s)`);
     } catch (err) {
-      addLog('error', `simulate_phase failed: ${err}`);
+      addLog('error', `IPC failed: ${String(err)}`);
     }
   };
 
@@ -317,8 +324,12 @@ export default function DevDashboard() {
         </div>
         <div className="header-status">
           <StatusBadge
-            color={overlayVisible ? '#22c55e' : '#ef4444'}
-            label={`Overlay: ${overlayVisible ? 'VISIBLE' : 'HIDDEN'}`}
+            color={ipcReady === null ? '#f59e0b' : ipcReady ? '#22c55e' : '#ef4444'}
+            label={ipcReady === null ? 'IPC: connecting…' : ipcReady ? 'IPC: ready' : 'IPC: ERROR — see log'}
+          />
+          <StatusBadge
+            color={overlayVisible ? '#22c55e' : '#6b7280'}
+            label={`Overlay: ${overlayVisible ? 'SHOWN' : 'HIDDEN'}`}
           />
           <StatusBadge
             color={phaseInfo.color}
