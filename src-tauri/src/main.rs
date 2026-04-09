@@ -346,11 +346,10 @@ async fn main() {
                 Ok(server) => {
                     println!(r"Named pipe server started (\.\pipe\broken_latch)");
 
-                    let server_clone = PipeServer::new().unwrap();
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
                         loop {
-                            if let Some(msg) = server_clone.try_recv() {
+                            if let Some(msg) = server.try_recv() {
                                 let state = handle.state::<AppState>();
                                 let status = match msg {
                                     PipeMessage::DX11Hooked  => "DirectX 11 hooked",
@@ -364,8 +363,6 @@ async fn main() {
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     });
-
-                    *app.state::<AppState>().pipe_server.lock().unwrap() = Some(server);
                 }
                 Err(e) => eprintln!("Failed to start pipe server: {}", e),
             }

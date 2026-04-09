@@ -33,6 +33,7 @@
 
 import { useState, useEffect } from 'react';
 import { listen }              from '@tauri-apps/api/event';
+import { invoke }              from '@tauri-apps/api/core';
 
 import Launching   from '../stages/Launching';
 import InLobby     from '../stages/InLobby';
@@ -64,6 +65,12 @@ export default function OverlayApp() {
   const [phase, setPhase] = useState<GamePhase>('NOT_RUNNING');
 
   useEffect(() => {
+    // Sync current phase on mount — handles the case where simulate_phase()
+    // was called before this window finished loading and missed the event.
+    invoke<string>('get_current_phase')
+      .then(p => setPhase(p as GamePhase))
+      .catch(() => {}); // ignore if backend not ready yet
+
     /**
      * Subscribe to the `phase-changed` event.
      *
