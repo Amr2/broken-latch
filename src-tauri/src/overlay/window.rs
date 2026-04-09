@@ -6,20 +6,20 @@ use windows::Win32::{
 };
 use std::sync::{Arc, Mutex};
 
-/// Manages the transparent fullscreen overlay window.
+/// Manages a single transparent fullscreen overlay window.
+///
+/// One `OverlayWindow` is created per overlay entry in `phases.json`.
+/// PhaseManager owns all live instances and creates/destroys them as phases
+/// transition.
 ///
 /// # Win32 window properties applied after creation
 /// - `WS_EX_LAYERED`          — enables per-pixel alpha & opacity control
 /// - `WS_EX_TRANSPARENT`      — default click-through (passes input to game)
 /// - `WS_EX_TOPMOST`          — z-order above all other windows
-/// - `WDA_EXCLUDEFROMCAPTURE` — hidden from OBS/Discord screen capture
+/// - `WDA_EXCLUDEFROMCAPTURE` — hidden from OBS/Discord screen capture by default
 pub struct OverlayWindow {
     window: WebviewWindow,
     /// Raw HWND stored as `isize` so `OverlayWindow` implements `Send + Sync`.
-    ///
-    /// Win32 HWNDs are process-global handles that can safely cross thread
-    /// boundaries. Tauri's `WebviewWindow` owns the actual resource lifetime;
-    /// we just keep the handle value for Win32 API calls.
     hwnd_raw: isize,
     interactive_regions: Arc<Mutex<Vec<Rect>>>,
 }
@@ -42,75 +42,95 @@ unsafe impl Send for OverlayWindow {}
 unsafe impl Sync for OverlayWindow {}
 
 impl OverlayWindow {
-    /// Reconstruct the HWND from the stored raw value.
     fn hwnd(&self) -> HWND {
         HWND(self.hwnd_raw as *mut core::ffi::c_void)
     }
 
-    /// Create and configure the transparent fullscreen overlay window.
+    /// Create a transparent fullscreen overlay window.
     ///
-    /// NOTE on `always_on_top` / `fullscreen` in the Tauri builder:
-    ///   We set these to `false` here and apply the Win32 `WS_EX_TOPMOST` style
-    ///   directly via `SetWindowPos(HWND_TOPMOST)` in `apply_overlay_styles`.
-    ///   This avoids the Tauri builder applying TOPMOST *before* the window is
-    ///   fully created, which can interfere with the Dev Simulator window focus.
-    ///   In production the window is also sized to the screen via Win32 after creation.
-    pub fn create(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
-        // Get primary monitor dimensions so we can size the overlay correctly
+    /// # Arguments
+    /// * `app`   — Tauri AppHandle
+    /// * `label` — unique Tauri window identifier (e.g. "phase-ingame-overlay")
+    /// * `url`   — bundled page path ("ingame-overlay.html") or external URL
+    /// * `opacity` — initial opacity 0.0–1.0
+    /// * `screen_capture_visible` — whether OBS/Discord can capture this window
+    pub fn create(
+        app: &AppHandle,
+        label: &str,
+        url: &str,
+        opacity: f32,
+        screen_capture_visible: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let (screen_w, screen_h) = unsafe {
-            (
-                GetSystemMetrics(SM_CXSCREEN),
-                GetSystemMetrics(SM_CYSCREEN),
-            )
+            (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
         };
 
-        let window = tauri::WebviewWindowBuilder::new(
-            app,
-            "overlay",
-            tauri::WebviewUrl::App("overlay.html".into()),
-        )
-        .transparent(true)
-        .decorations(false)
-        .always_on_top(false)   // Applied via Win32 SetWindowPos below
-        .skip_taskbar(true)
-        .inner_size(screen_w as f64, screen_h as f64)
-        .position(0.0, 0.0)
-        .visible(false)
-        .build()?;
+        let webview_url = make_webview_url(url);
 
-        // Extract HWND and store it as isize (Send-safe)
-        let hwnd       = window.hwnd()?;
-        let hwnd_raw   = hwnd.0 as isize;
+        let window = tauri::WebviewWindowBuilder::new(app, label, webview_url)
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .inner_size(screen_w as f64, screen_h as f64)
+            .position(0.0, 0.0)
+            .visible(false)
+            .build()?;
 
-        Self::apply_overlay_styles(hwnd)?;
+        let hwnd     = window.hwnd()?;
+        let hwnd_raw = hwnd.0 as isize;
 
-        Ok(Self {
+        apply_overlay_styles(hwnd, screen_capture_visible)?;
+
+        let ov = Self {
             window,
             hwnd_raw,
             interactive_regions: Arc::new(Mutex::new(Vec::new())),
-        })
+        };
+
+        // Show immediately and apply opacity
+        ov.show()?;
+        ov.set_opacity(opacity)?;
+
+        Ok(ov)
     }
 
-    /// Apply Win32 extended styles for overlay behaviour.
+    /// Define which screen regions intercept mouse input.
     ///
-    /// We do NOT apply WS_EX_TOPMOST / HWND_TOPMOST here on purpose.
-    /// The overlay must NOT cover the Dev Simulator window while it is open.
-    /// When deployed in production (over a real game), the integrating code
-    /// would call SetWindowPos(HWND_TOPMOST) after detecting the game window.
-    fn apply_overlay_styles(hwnd: HWND) -> Result<(), Box<dyn std::error::Error>> {
-        unsafe {
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-            // WS_EX_LAYERED    — required for SetLayeredWindowAttributes (opacity)
-            // WS_EX_TRANSPARENT — click-through by default
-            let new_style = ex_style
-                | (WS_EX_LAYERED.0 as i32)
-                | (WS_EX_TRANSPARENT.0 as i32);
-            SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
+    /// Calls Win32 `SetWindowRgn()` with a combined region.
+    /// Pass an empty list to make the entire window click-through.
+    pub fn set_interactive_regions(&self, regions: Vec<Rect>) -> Result<(), Box<dyn std::error::Error>> {
+        *self.interactive_regions.lock().unwrap() = regions.clone();
 
-            // Hide from OBS / Discord / Windows Game Bar screen capture
-            SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)?;
+        if regions.is_empty() {
+            return self.set_click_through(true);
+        }
+
+        let hwnd = self.hwnd();
+        unsafe {
+            let combined_region = CreateRectRgn(0, 0, 0, 0);
+            for rect in regions {
+                let widget_region = CreateRectRgn(
+                    rect.x, rect.y,
+                    rect.x + rect.width,
+                    rect.y + rect.height,
+                );
+                CombineRgn(
+                    Some(combined_region),
+                    Some(combined_region),
+                    Some(widget_region),
+                    RGN_OR,
+                );
+                let _ = DeleteObject(widget_region.into());
+            }
+            let _ = SetWindowRgn(hwnd, Some(combined_region), true);
+            self.set_click_through(false)?;
         }
         Ok(())
+    }
+
+    pub fn get_interactive_regions(&self) -> Vec<Rect> {
+        self.interactive_regions.lock().unwrap().clone()
     }
 
     /// Toggle global click-through mode for the entire window.
@@ -128,48 +148,6 @@ impl OverlayWindow {
         Ok(())
     }
 
-    /// Define which screen regions intercept mouse input.
-    ///
-    /// Calls Win32 `SetWindowRgn()` with a combined region.
-    /// Pass an empty list to make the entire window click-through.
-    pub fn set_interactive_regions(&self, regions: Vec<Rect>) -> Result<(), Box<dyn std::error::Error>> {
-        *self.interactive_regions.lock().unwrap() = regions.clone();
-
-        if regions.is_empty() {
-            return self.set_click_through(true);
-        }
-
-        let hwnd = self.hwnd();
-        unsafe {
-            // Build a combined region from all widget bounding boxes
-            let combined_region = CreateRectRgn(0, 0, 0, 0);
-
-            for rect in regions {
-                let widget_region = CreateRectRgn(
-                    rect.x,
-                    rect.y,
-                    rect.x + rect.width,
-                    rect.y + rect.height,
-                );
-
-                // windows 0.61: CombineRgn/SetWindowRgn take Option<HRGN>
-                CombineRgn(
-                    Some(combined_region),
-                    Some(combined_region),
-                    Some(widget_region),
-                    RGN_OR,
-                );
-                let _ = DeleteObject(widget_region.into()); // HRGN → HGDIOBJ
-            }
-
-            let _ = SetWindowRgn(hwnd, Some(combined_region), true);
-
-            self.set_click_through(false)?;
-        }
-
-        Ok(())
-    }
-
     pub fn show(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.window.show()?;
         Ok(())
@@ -180,11 +158,16 @@ impl OverlayWindow {
         Ok(())
     }
 
-    /// Set overlay opacity via `SetLayeredWindowAttributes(LWA_ALPHA)`.
+    pub fn close(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.window.close()?;
+        Ok(())
+    }
+
+    /// Set opacity via `SetLayeredWindowAttributes(LWA_ALPHA)`.
     pub fn set_opacity(&self, opacity: f32) -> Result<(), Box<dyn std::error::Error>> {
-        let opacity_byte = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
+        let byte = (opacity.clamp(0.0, 1.0) * 255.0) as u8;
         unsafe {
-            SetLayeredWindowAttributes(self.hwnd(), COLORREF(0), opacity_byte, LWA_ALPHA)?;
+            SetLayeredWindowAttributes(self.hwnd(), COLORREF(0), byte, LWA_ALPHA)?;
         }
         Ok(())
     }
@@ -197,9 +180,40 @@ impl OverlayWindow {
         }
         Ok(())
     }
+}
 
-    pub fn get_interactive_regions(&self) -> Vec<Rect> {
-        self.interactive_regions.lock().unwrap().clone()
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Apply Win32 extended styles required for overlay behaviour.
+fn apply_overlay_styles(hwnd: HWND, screen_capture_visible: bool) -> Result<(), Box<dyn std::error::Error>> {
+    unsafe {
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        let new_style = ex_style
+            | (WS_EX_LAYERED.0 as i32)
+            | (WS_EX_TRANSPARENT.0 as i32);
+        SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
+
+        // Keep on top of the game window
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE,
+        )?;
+
+        let affinity = if screen_capture_visible { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
+        SetWindowDisplayAffinity(hwnd, affinity)?;
+    }
+    Ok(())
+}
+
+pub fn make_webview_url(url: &str) -> tauri::WebviewUrl {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        tauri::WebviewUrl::External(url.parse().expect("invalid external URL"))
+    } else {
+        tauri::WebviewUrl::App(url.into())
     }
 }
 
@@ -219,13 +233,18 @@ mod tests {
     }
 
     #[test]
-    fn test_region_manager() {
-        let mut manager = super::super::region::RegionManager::new();
-        let rect1 = Rect { x: 0, y: 0, width: 100, height: 100 };
-        manager.add_region("app1.widget1".to_string(), rect1.clone());
-        let regions = manager.get_all_regions();
-        assert_eq!(regions.len(), 1);
-        manager.remove_region("app1.widget1");
-        assert_eq!(manager.get_all_regions().len(), 0);
+    fn test_webview_url_external() {
+        match make_webview_url("https://example.com") {
+            tauri::WebviewUrl::External(_) => {}
+            _ => panic!("expected External"),
+        }
+    }
+
+    #[test]
+    fn test_webview_url_app() {
+        match make_webview_url("overlay.html") {
+            tauri::WebviewUrl::App(_) => {}
+            _ => panic!("expected App"),
+        }
     }
 }

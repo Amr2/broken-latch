@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/capabilities.json",
+  "identifier": "phase-windows",
+  "description": "Capabilities for all dynamically created phase windows and overlays.\n\nAll phase-managed windows get the Tauri label 'phase-{id}' (e.g.\n'phase-ingame-overlay', 'phase-lobby-win').  The glob pattern 'phase-*'\nmatches all of them with a single capability entry.\n\n'core:default' grants invoke(), event listen/emit, and core window APIs.",
+  "windows": ["phase-*"],
+  "permissions": ["core:default"]
+}

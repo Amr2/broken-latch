@@ -12,77 +12,58 @@ mod sdk_server;
 mod db;
 mod tray;
 mod config;
+mod phase_manager;
 
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, State};
-use tauri_plugin_sql::{Builder as SqlBuilder};
+use tauri::{Manager, State};
+use tauri_plugin_sql::Builder as SqlBuilder;
 
-use overlay::{OverlayWindow, RegionManager};
+use overlay::Rect;
 use hook::{inject_into_league, PipeMessage, PipeServer};
+use phase_manager::PhaseManager;
 
 // ---------------------------------------------------------------------------
 // Application State
 // ---------------------------------------------------------------------------
 
 /// Central state object shared across all Tauri commands.
-///
-/// Every field is wrapped in `Mutex` so Tauri can hand out `State<'_, AppState>`
-/// to async command handlers safely from any thread.
-struct AppState {
-    /// The transparent fullscreen overlay window (created once at startup).
-    overlay: Mutex<Option<OverlayWindow>>,
-    /// Tracks which rectangular regions of the overlay capture mouse input.
-    region_manager: Mutex<RegionManager>,
+pub struct AppState {
+    /// Manages per-phase window/overlay lifecycle (reads phases.json).
+    pub phase_manager: Mutex<PhaseManager>,
     /// Named-pipe server that receives messages from the hook DLL.
     pipe_server: Mutex<Option<PipeServer>>,
-    /// Last known hook status string ("Not injected", "DirectX 11 hooked", etc.).
+    /// Last known hook status string.
     hook_status: Mutex<String>,
-    /// Currently simulated game phase (drives overlay content in demo mode).
-    ///
-    /// In production this would be set by the game lifecycle detector (Task 04).
-    /// Possible values: NOT_RUNNING | LAUNCHING | IN_LOBBY | CHAMP_SELECT |
-    ///                  LOADING | IN_GAME | END_GAME
-    current_phase: Mutex<String>,
-    /// A copy of the TOML config that was loaded at startup, exposed to the
-    /// frontend via `get_platform_config` so the dev dashboard can display it.
+    /// When `true` the auto-detector will not override the current phase.
+    /// Set by `simulate_phase`, cleared by `release_forced_phase`.
+    pub force_override: Mutex<bool>,
+    /// Copy of the TOML config loaded at startup.
     platform_config: config::PlatformConfig,
 }
 
 // ---------------------------------------------------------------------------
-// Overlay commands
+// Overlay control commands
 // ---------------------------------------------------------------------------
 
-/// Show the transparent overlay window.
-///
-/// Call this when a game phase begins (e.g. entering CHAMP_SELECT).
-/// The overlay starts hidden so it does not cover the desktop on startup.
+/// Show the first active overlay window (if any).
 #[tauri::command]
 async fn show_overlay(state: State<'_, AppState>) -> Result<(), String> {
-    let overlay = state.overlay.lock().unwrap();
-    if let Some(ref window) = *overlay {
-        window.show().map_err(|e| e.to_string())?;
+    if let Some(ov) = state.phase_manager.lock().unwrap().first_overlay() {
+        ov.show().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// Hide the transparent overlay window.
-///
-/// Call this when returning to NOT_RUNNING or whenever the overlay
-/// should be suppressed entirely.
+/// Hide the first active overlay window (if any).
 #[tauri::command]
 async fn hide_overlay(state: State<'_, AppState>) -> Result<(), String> {
-    let overlay = state.overlay.lock().unwrap();
-    if let Some(ref window) = *overlay {
-        window.hide().map_err(|e| e.to_string())?;
+    if let Some(ov) = state.phase_manager.lock().unwrap().first_overlay() {
+        ov.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// Set the global opacity of the overlay window.
-///
-/// # Arguments
-/// * `opacity` – `0.0` (fully transparent) to `1.0` (fully opaque).
-///   Values are clamped by the Win32 `SetLayeredWindowAttributes` call.
+/// Set opacity on the first active overlay window.
 ///
 /// # Example (JS)
 /// ```js
@@ -90,21 +71,13 @@ async fn hide_overlay(state: State<'_, AppState>) -> Result<(), String> {
 /// ```
 #[tauri::command]
 async fn set_overlay_opacity(opacity: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let overlay = state.overlay.lock().unwrap();
-    if let Some(ref window) = *overlay {
-        window.set_opacity(opacity).map_err(|e| e.to_string())?;
+    if let Some(ov) = state.phase_manager.lock().unwrap().first_overlay() {
+        ov.set_opacity(opacity).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// Define which rectangular areas of the overlay intercept mouse events.
-///
-/// Every area *outside* these rectangles remains click-through — input
-/// passes straight to the game underneath.  Each installed app widget
-/// registers its bounding box here so the platform can compute the
-/// combined interactive region via `SetWindowRgn`.
-///
-/// Pass an empty `regions` list to make the entire overlay click-through.
+/// Define which rectangular areas of the active overlay intercept mouse events.
 ///
 /// # Example (JS)
 /// ```js
@@ -114,24 +87,16 @@ async fn set_overlay_opacity(opacity: f32, state: State<'_, AppState>) -> Result
 /// ```
 #[tauri::command]
 async fn update_interactive_regions(
-    regions: Vec<overlay::Rect>,
+    regions: Vec<Rect>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let overlay = state.overlay.lock().unwrap();
-    if let Some(ref window) = *overlay {
-        window.set_interactive_regions(regions).map_err(|e| e.to_string())?;
+    if let Some(ov) = state.phase_manager.lock().unwrap().first_overlay() {
+        ov.set_interactive_regions(regions).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// Control whether the overlay appears in OBS / Discord screen captures.
-///
-/// When `visible = false` (default) the Win32 `WDA_EXCLUDEFROMCAPTURE` flag
-/// hides the window from any screen-capture API — the game renders normally
-/// in the stream but the overlay is invisible to streamers' audiences.
-///
-/// When `visible = true` the overlay is included in captures, which is useful
-/// for content-creator apps that intentionally want to appear on stream.
+/// Toggle OBS/Discord screen-capture visibility for the active overlay.
 ///
 /// # Example (JS)
 /// ```js
@@ -142,86 +107,62 @@ async fn set_screen_capture_visible(
     visible: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let overlay = state.overlay.lock().unwrap();
-    if let Some(ref window) = *overlay {
-        window.set_screen_capture_visible(visible).map_err(|e| e.to_string())?;
+    if let Some(ov) = state.phase_manager.lock().unwrap().first_overlay() {
+        ov.set_screen_capture_visible(visible).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// Return the list of currently registered interactive regions.
-///
-/// Useful for debugging — the dev dashboard calls this to display the
-/// active widget bounding boxes.
+/// Return the active overlay's interactive regions.
 #[tauri::command]
-async fn get_interactive_regions(state: State<'_, AppState>) -> Result<Vec<overlay::Rect>, String> {
-    let overlay = state.overlay.lock().unwrap();
-    if let Some(ref window) = *overlay {
-        Ok(window.get_interactive_regions())
-    } else {
-        Ok(Vec::new())
-    }
+async fn get_interactive_regions(state: State<'_, AppState>) -> Result<Vec<Rect>, String> {
+    Ok(state.phase_manager.lock().unwrap()
+        .first_overlay()
+        .map(|ov| ov.get_interactive_regions())
+        .unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------
-// Hook commands (DLL injection — kept for completeness, Vanguard-unsafe)
+// Hook commands
 // ---------------------------------------------------------------------------
 
-/// Inject the DirectX hook DLL into the League of Legends process.
+/// Inject the DirectX hook DLL into League of Legends.
 ///
-/// ⚠️  This uses classic `CreateRemoteThread` injection and is blocked by
-/// Vanguard anti-cheat.  It is kept here for reference only.  The platform
-/// now uses a transparent `WebviewWindow` overlay instead (Vanguard-safe).
-///
-/// Expects `broken_latch_hook.dll` next to the platform executable.
+/// ⚠️  Blocked by Vanguard anti-cheat.  Kept for reference only.
 #[tauri::command]
 async fn inject_hook() -> Result<(), String> {
     let exe_dir = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .parent()
-        .ok_or("Failed to get exe directory")?
+        .ok_or("no exe dir")?
         .to_path_buf();
 
     let dll_path = exe_dir.join("broken_latch_hook.dll");
-
     if !dll_path.exists() {
         return Err(format!("DLL not found at {:?}", dll_path));
     }
-
     inject_into_league(dll_path).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Return the last known hook status string.
-///
-/// Possible values: "Not injected" | "DirectX 11 hooked" | "DirectX 12 hooked" | "Hook failed"
 #[tauri::command]
 async fn get_hook_status(state: State<'_, AppState>) -> Result<String, String> {
-    let status = state.hook_status.lock().unwrap();
-    Ok(status.clone())
+    Ok(state.hook_status.lock().unwrap().clone())
 }
 
 // ---------------------------------------------------------------------------
-// Game phase simulation commands
+// Phase commands
 // ---------------------------------------------------------------------------
 
-/// Simulate a game phase transition for demo / development purposes.
+/// Force a specific game phase for development/testing.
 ///
-/// In production the phase is set automatically by the game lifecycle
-/// detector (Task 04: `game::detect` + `game::lcu`).  During development
-/// — before the detector is wired up — this command lets you drive the
-/// overlay UI through all seven phases from the dev dashboard.
-///
-/// # What happens internally
-/// 1. `current_phase` in `AppState` is updated.
-/// 2. A `phase-changed` Tauri event is emitted to **all** windows.
-///    The overlay window listens for this event and swaps its React component.
-/// 3. The overlay is automatically shown or hidden:
-///    - `NOT_RUNNING` → hidden (no overlay on desktop)
-///    - all other phases → shown (overlay visible over game)
+/// While a phase is forced the automatic LoL process detector is suspended —
+/// it keeps running in the background but will not override this phase.
+/// Call `release_forced_phase` to hand control back to the detector.
 ///
 /// # Arguments
-/// * `phase` – one of: `NOT_RUNNING` | `LAUNCHING` | `IN_LOBBY` |
+/// * `phase` — one of: `NOT_RUNNING` | `LAUNCHING` | `IN_LOBBY` |
 ///   `CHAMP_SELECT` | `LOADING` | `IN_GAME` | `END_GAME`
 ///
 /// # Example (JS)
@@ -234,24 +175,23 @@ async fn simulate_phase(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // 1. Persist the new phase in state
-    *state.current_phase.lock().unwrap() = phase.clone();
+    *state.force_override.lock().unwrap() = true;
+    state.phase_manager.lock().unwrap()
+        .transition(&phase, &app_handle)
+        .map_err(|e| e.to_string())
+}
 
-    // 2. Broadcast the phase to every window so the overlay React app can react
-    app_handle
-        .emit("phase-changed", phase.clone())
-        .map_err(|e| e.to_string())?;
-
-    // 3. Auto-manage overlay visibility based on phase
-    let overlay = state.overlay.lock().unwrap();
-    if let Some(ref window) = *overlay {
-        match phase.as_str() {
-            "NOT_RUNNING" => window.hide().map_err(|e| e.to_string())?,
-            _             => window.show().map_err(|e| e.to_string())?,
-        }
-    }
-
-    println!("[phase] → {}", phase);
+/// Release the dev-dashboard force override and let the auto-detector
+/// resume controlling phase transitions.
+///
+/// # Example (JS)
+/// ```js
+/// await invoke('release_forced_phase');
+/// ```
+#[tauri::command]
+async fn release_forced_phase(state: State<'_, AppState>) -> Result<(), String> {
+    *state.force_override.lock().unwrap() = false;
+    println!("[phase] auto-detection resumed");
     Ok(())
 }
 
@@ -263,19 +203,25 @@ async fn simulate_phase(
 /// ```
 #[tauri::command]
 async fn get_current_phase(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.current_phase.lock().unwrap().clone())
+    Ok(state.phase_manager.lock().unwrap().current_phase().to_string())
 }
 
-/// Return the full platform configuration that was loaded from `config.toml`
-/// at startup.
+/// Return `true` if the dev dashboard has forced a phase override.
 ///
-/// The dev dashboard uses this to display the live config values so developers
-/// can see which TOML settings are currently active without opening the file.
+/// # Example (JS)
+/// ```js
+/// const forced = await invoke('is_phase_forced');
+/// ```
+#[tauri::command]
+async fn is_phase_forced(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(*state.force_override.lock().unwrap())
+}
+
+/// Return the full platform configuration loaded from `config.toml`.
 ///
 /// # Example (JS)
 /// ```js
 /// const cfg = await invoke('get_platform_config');
-/// console.log(cfg.overlay.default_opacity); // 1.0
 /// ```
 #[tauri::command]
 async fn get_platform_config(state: State<'_, AppState>) -> Result<config::PlatformConfig, String> {
@@ -288,11 +234,8 @@ async fn get_platform_config(state: State<'_, AppState>) -> Result<config::Platf
 
 #[tokio::main]
 async fn main() {
-    // Load platform configuration from %APPDATA%/broken-latch/config.toml
-    // (creates a default file on first run)
     let cfg = config::load_config().expect("Failed to load config");
     println!("broken-latch Platform v{}", cfg.version);
-    println!("Configuration loaded successfully");
 
     tauri::Builder::default()
         .plugin(
@@ -303,71 +246,69 @@ async fn main() {
         .setup(move |app| {
             println!("Platform initializing...");
 
-            // Initialize the SQLite database (runs pending migrations)
-            let handle = app.handle().clone();
+            // Initialize database
+            let db_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = db::init_db(&handle).await {
-                    eprintln!("Database initialization error: {}", e);
+                if let Err(e) = db::init_db(&db_handle).await {
+                    eprintln!("Database init error: {}", e);
                 }
             });
 
-            // Create the transparent fullscreen overlay window
-            let overlay = match OverlayWindow::create(app.handle()) {
-                Ok(window) => {
-                    println!("Overlay window created successfully");
-
-                    if let Err(e) = window.set_opacity(cfg.overlay.default_opacity) {
-                        eprintln!("Failed to set overlay opacity: {}", e);
-                    }
-                    if let Err(e) = window.set_screen_capture_visible(cfg.overlay.screen_capture_visible) {
-                        eprintln!("Failed to set screen capture visibility: {}", e);
-                    }
-
-                    Some(window)
-                }
-                Err(e) => {
-                    eprintln!("Failed to create overlay window: {}", e);
-                    None
-                }
+            // Load phases.json from the bundled resources directory
+            let phases_json = {
+                let res_dir = app.path().resource_dir()
+                    .expect("could not resolve resource dir");
+                let path = res_dir.join("resources").join("phases.json");
+                std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| {
+                        eprintln!("Failed to read phases.json at {:?}: {}", path, e);
+                        // Return a minimal valid JSON so the platform still starts
+                        r#"{"NOT_RUNNING":{"windows":[],"overlays":[]}}"#.to_string()
+                    })
             };
 
-            // Register all shared state
+            let phase_manager = PhaseManager::from_json(&phases_json)
+                .expect("invalid phases.json");
+
+            // Register shared state
             app.manage(AppState {
-                overlay:         Mutex::new(overlay),
-                region_manager:  Mutex::new(RegionManager::new()),
+                phase_manager:   Mutex::new(phase_manager),
                 pipe_server:     Mutex::new(None),
                 hook_status:     Mutex::new("Not injected".to_string()),
-                current_phase:   Mutex::new("NOT_RUNNING".to_string()),
+                force_override:  Mutex::new(false),
                 platform_config: cfg.clone(),
             });
 
-            // Start the named-pipe server that receives messages from the hook DLL
+            // Start the named-pipe server for hook DLL messages
             match PipeServer::new() {
                 Ok(server) => {
-                    println!(r"Named pipe server started (\.\pipe\broken_latch)");
-
-                    let handle = app.handle().clone();
-                    std::thread::spawn(move || {
-                        loop {
-                            if let Some(msg) = server.try_recv() {
-                                let state = handle.state::<AppState>();
-                                let status = match msg {
-                                    PipeMessage::DX11Hooked  => "DirectX 11 hooked",
-                                    PipeMessage::DX12Hooked  => "DirectX 12 hooked",
-                                    PipeMessage::HookFailed  => "Hook failed",
-                                    PipeMessage::Custom(ref s) => s.as_str(),
-                                };
-                                *state.hook_status.lock().unwrap() = status.to_string();
-                                println!("[hook] {}", status);
-                            }
-                            std::thread::sleep(std::time::Duration::from_millis(100));
+                    println!(r"Named pipe server started (\\.\pipe\broken_latch)");
+                    let pipe_handle = app.handle().clone();
+                    std::thread::spawn(move || loop {
+                        if let Some(msg) = server.try_recv() {
+                            let state  = pipe_handle.state::<AppState>();
+                            let status = match msg {
+                                PipeMessage::DX11Hooked     => "DirectX 11 hooked",
+                                PipeMessage::DX12Hooked     => "DirectX 12 hooked",
+                                PipeMessage::HookFailed     => "Hook failed",
+                                PipeMessage::Custom(ref s)  => s.as_str(),
+                            };
+                            *state.hook_status.lock().unwrap() = status.to_string();
+                            println!("[hook] {}", status);
                         }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
                     });
                 }
-                Err(e) => eprintln!("Failed to start pipe server: {}", e),
+                Err(e) => eprintln!("Pipe server error: {}", e),
             }
 
-            println!("Platform ready! Open the Dev Simulator window to begin.");
+            // Start automatic LoL process + LCU phase detector
+            let detector_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                game::start_detector(detector_handle).await;
+            });
+
+            println!("Platform ready — watching for League of Legends...");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -381,11 +322,13 @@ async fn main() {
             // Hook (legacy DLL approach)
             inject_hook,
             get_hook_status,
-            // Game phase simulation
+            // Phase management
             simulate_phase,
+            release_forced_phase,
             get_current_phase,
+            is_phase_forced,
             get_platform_config,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("error running tauri application");
 }

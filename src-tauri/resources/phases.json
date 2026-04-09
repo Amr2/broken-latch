@@ -1,0 +1,102 @@
+{
+  "NOT_RUNNING": {
+    "windows": [],
+    "overlays": []
+  },
+  "LAUNCHING": {
+    "windows": [
+      {
+        "id": "launching-win",
+        "url": "launching.html",
+        "title": "broken-latch — Launching",
+        "width": 480,
+        "height": 320,
+        "x": null,
+        "y": null,
+        "decorations": true,
+        "always_on_top": true,
+        "resizable": false
+      }
+    ],
+    "overlays": []
+  },
+  "IN_LOBBY": {
+    "windows": [
+      {
+        "id": "lobby-win",
+        "url": "in-lobby.html",
+        "title": "broken-latch — Lobby",
+        "width": 580,
+        "height": 420,
+        "x": null,
+        "y": null,
+        "decorations": true,
+        "always_on_top": true,
+        "resizable": false
+      }
+    ],
+    "overlays": []
+  },
+  "CHAMP_SELECT": {
+    "windows": [
+      {
+        "id": "champ-select-win",
+        "url": "champ-select.html",
+        "title": "broken-latch — Champ Select",
+        "width": 680,
+        "height": 520,
+        "x": null,
+        "y": null,
+        "decorations": true,
+        "always_on_top": true,
+        "resizable": false
+      }
+    ],
+    "overlays": []
+  },
+  "LOADING": {
+    "windows": [
+      {
+        "id": "loading-win",
+        "url": "loading.html",
+        "title": "broken-latch — Loading",
+        "width": 580,
+        "height": 420,
+        "x": null,
+        "y": null,
+        "decorations": true,
+        "always_on_top": true,
+        "resizable": false
+      }
+    ],
+    "overlays": []
+  },
+  "IN_GAME": {
+    "windows": [],
+    "overlays": [
+      {
+        "id": "ingame-overlay",
+        "url": "ingame-overlay.html",
+        "opacity": 1.0,
+        "screen_capture_visible": false
+      }
+    ]
+  },
+  "END_GAME": {
+    "windows": [
+      {
+        "id": "end-game-win",
+        "url": "end-game.html",
+        "title": "broken-latch — End of Game",
+        "width": 780,
+        "height": 580,
+        "x": null,
+        "y": null,
+        "decorations": true,
+        "always_on_top": true,
+        "resizable": false
+      }
+    ],
+    "overlays": []
+  }
+}

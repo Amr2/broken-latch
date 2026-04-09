@@ -173,7 +173,8 @@ export default function DevDashboard() {
   const [activeRegions, setActiveRegions]       = useState<Rect[]>([]);
   const [config, setConfig]                     = useState<PlatformConfig | null>(null);
   const [log, setLog]                           = useState<LogEntry[]>([]);
-  const [ipcReady, setIpcReady]                 = useState<boolean | null>(null); // null=checking, true=ok, false=error
+  const [ipcReady, setIpcReady]                 = useState<boolean | null>(null);
+  const [isForced, setIsForced]                 = useState(false); // true = dev override active
   const logRef                                  = useRef<HTMLDivElement>(null);
 
   // Scroll event log to bottom on new entry
@@ -204,13 +205,17 @@ export default function DevDashboard() {
         addLog('error', `IPC NOT available: ${String(err)} — check capabilities config`);
       });
 
-    // Load current phase (in case the app was re-opened mid-game)
+    // Load current phase and forced state
     invoke<string>('get_current_phase')
       .then(phase => {
         setCurrentPhase(phase as GamePhase);
         addLog('system', `Current phase: ${phase}`);
       })
-      .catch(() => {/* ignore */});
+      .catch(() => {});
+
+    invoke<boolean>('is_phase_forced')
+      .then(forced => setIsForced(forced))
+      .catch(() => {});
 
     addLog('system', 'Dev Simulator ready — select a game phase to begin');
 
@@ -235,13 +240,23 @@ export default function DevDashboard() {
 
     try {
       await invoke('simulate_phase', { phase });
+      setIsForced(true);
 
-      // Register demo interactive regions for this phase
       const regions = DEMO_REGIONS[phase];
       await invoke('update_interactive_regions', { regions });
-      addLog('system', `overlay ${PHASES[phase].overlayShown ? 'shown' : 'hidden'} · ${regions.length} interactive region(s)`);
+      addLog('system', `overlay ${PHASES[phase].overlayShown ? 'shown' : 'hidden'} · ${regions.length} interactive region(s) · auto-detection paused`);
     } catch (err) {
       addLog('error', `IPC failed: ${String(err)}`);
+    }
+  };
+
+  const handleReleaseOverride = async () => {
+    try {
+      addLog('command', 'release_forced_phase() — resuming auto-detection');
+      await invoke('release_forced_phase');
+      setIsForced(false);
+    } catch (err) {
+      addLog('error', `release_forced_phase failed: ${err}`);
     }
   };
 
@@ -339,6 +354,10 @@ export default function DevDashboard() {
             color={captureVisible ? '#f59e0b' : '#6b7280'}
             label={`OBS: ${captureVisible ? 'VISIBLE' : 'HIDDEN'}`}
           />
+          <StatusBadge
+            color={isForced ? '#ef4444' : '#22c55e'}
+            label={isForced ? 'Detection: OVERRIDDEN' : 'Detection: AUTO'}
+          />
         </div>
       </header>
 
@@ -374,6 +393,16 @@ export default function DevDashboard() {
                 </button>
               ))}
             </div>
+            {/* Override / release control */}
+            {isForced && (
+              <div className="override-banner">
+                <span>⚠️ Auto-detection paused — dev override active</span>
+                <button className="ctrl-btn green" onClick={handleReleaseOverride}>
+                  Release Override (resume auto)
+                </button>
+              </div>
+            )}
+
             {/* Current phase description */}
             <div className="phase-desc-box" style={{ borderColor: phaseInfo.color }}>
               <span style={{ color: phaseInfo.color }}>{phaseInfo.icon} {phaseInfo.label}</span>
@@ -524,8 +553,10 @@ export default function DevDashboard() {
               <ApiEntry cmd="set_screen_capture_visible" args="visible: bool"                desc="Toggle WDA_EXCLUDEFROMCAPTURE (OBS visibility)" />
               <ApiEntry cmd="update_interactive_regions" args="regions: Rect[]"              desc="SetWindowRgn — define clickable widget areas" />
               <ApiEntry cmd="get_interactive_regions"    args=""                             desc="Returns currently active region array" />
-              <ApiEntry cmd="simulate_phase"             args="phase: string"                desc="Emit phase-changed event + auto-manage overlay" />
+              <ApiEntry cmd="simulate_phase"             args="phase: string"                desc="Force a phase (pauses auto-detection)" />
+              <ApiEntry cmd="release_forced_phase"       args=""                             desc="Resume auto-detection after a force override" />
               <ApiEntry cmd="get_current_phase"          args=""                             desc="Returns current GamePhase string" />
+              <ApiEntry cmd="is_phase_forced"            args=""                             desc="Returns true if dev override is active" />
               <ApiEntry cmd="get_platform_config"        args=""                             desc="Returns full config.toml as JSON object" />
               <ApiEntry cmd="inject_hook"                args=""                             desc="⚠️ Legacy DLL injection (Vanguard-unsafe)" />
               <ApiEntry cmd="get_hook_status"            args=""                             desc="Returns DLL hook status string" />
