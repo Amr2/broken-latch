@@ -245,8 +245,13 @@ impl PhaseManager {
             .skip_taskbar(cfg.skip_taskbar)
             .focused(cfg.focused);
 
-        if let Some(mw) = cfg.min_width  { b = b.min_inner_size(mw as f64, 0.0); }
-        if let Some(mh) = cfg.min_height { b = b.min_inner_size(0.0, mh as f64); }
+        if let (Some(mw), Some(mh)) = (cfg.min_width, cfg.min_height) {
+            b = b.min_inner_size(mw as f64, mh as f64);
+        } else if let Some(mw) = cfg.min_width {
+            b = b.min_inner_size(mw as f64, 0.0);
+        } else if let Some(mh) = cfg.min_height {
+            b = b.min_inner_size(0.0, mh as f64);
+        }
 
         b = if let (Some(x), Some(y)) = (cfg.x, cfg.y) {
             b.position(x as f64, y as f64)
