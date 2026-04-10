@@ -102,7 +102,7 @@ impl OverlayWindow {
         let hwnd     = window.hwnd()?;
         let hwnd_raw = hwnd.0 as isize;
 
-        apply_overlay_styles(hwnd, screen_capture_visible, click_through, always_on_top)?;
+        apply_overlay_styles(hwnd, screen_capture_visible, click_through, always_on_top);
 
         let ov = Self {
             window,
@@ -111,7 +111,9 @@ impl OverlayWindow {
         };
 
         ov.show()?;
-        ov.set_opacity(opacity)?;
+        if let Err(e) = ov.set_opacity(opacity) {
+            eprintln!("[overlay] set_opacity failed (non-fatal): {}", e);
+        }
 
         Ok(ov)
     }
@@ -208,13 +210,21 @@ impl OverlayWindow {
 // ---------------------------------------------------------------------------
 
 /// Apply Win32 extended styles required for overlay behaviour.
+///
+/// Each call is isolated — a failure in one (e.g. `SetWindowDisplayAffinity`
+/// on older Windows builds, or `SetWindowPos` returning ERROR_NOT_ENOUGH_MEMORY
+/// when the system is resource-constrained) is logged but does NOT abort window
+/// creation.  The window is always shown; advanced features degrade gracefully.
 fn apply_overlay_styles(
     hwnd: HWND,
     screen_capture_visible: bool,
     click_through: bool,
     always_on_top: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) {
     unsafe {
+        // ── Extended styles ────────────────────────────────────────────────
+        // WS_EX_LAYERED  → required for SetLayeredWindowAttributes (opacity)
+        // WS_EX_TRANSPARENT → click-through (passes input to underlying window)
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
         let mut new_style = ex_style | (WS_EX_LAYERED.0 as i32);
         if click_through {
@@ -222,13 +232,27 @@ fn apply_overlay_styles(
         }
         SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
 
+        // ── Z-order ────────────────────────────────────────────────────────
+        // SWP_NOACTIVATE prevents focus stealing which can cause ERROR_NOT_ENOUGH_MEMORY
+        // on systems where activating a window needs extra kernel structures.
         let z_order = if always_on_top { HWND_TOPMOST } else { HWND_NOTOPMOST };
-        SetWindowPos(hwnd, Some(z_order), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)?;
+        if let Err(e) = SetWindowPos(
+            hwnd, Some(z_order),
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        ) {
+            eprintln!("[overlay] SetWindowPos z-order failed (non-fatal): {}", e);
+        }
 
+        // ── Screen-capture exclusion ───────────────────────────────────────
+        // WDA_EXCLUDEFROMCAPTURE requires Windows 10 2004+ (build 19041).
+        // On older builds, or when DWM resources are low, this can fail —
+        // we log and continue rather than aborting window creation.
         let affinity = if screen_capture_visible { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
-        SetWindowDisplayAffinity(hwnd, affinity)?;
+        if let Err(e) = SetWindowDisplayAffinity(hwnd, affinity) {
+            eprintln!("[overlay] SetWindowDisplayAffinity failed (non-fatal): {}", e);
+        }
     }
-    Ok(())
 }
 
 pub fn make_webview_url(url: &str) -> tauri::WebviewUrl {
