@@ -1,0 +1,49 @@
+/* OverlayFrame — structural shell for every overlay window */
+
+.overlay-frame {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  /* Transparent — individual widgets set their own backgrounds */
+  background: transparent;
+}
+
+/* 4px drag strip injected at the top of every overlay window.
+   Only interactive (draggable) when the overlay has click_through: false.
+   The `data-tauri-drag-region` attribute is what triggers Tauri drag logic. */
+.overlay-drag-edge {
+  flex-shrink: 0;
+  height: 4px;
+  width: 100%;
+  /* Subtle visual cue — visible on hover so developers can see it during dev */
+  background: rgba(255, 255, 255, 0.06);
+  cursor: grab;
+  pointer-events: auto;     /* always receives pointer events in-browser */
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.overlay-drag-edge:hover {
+  background: rgba(99, 102, 241, 0.35);  /* indigo tint on hover */
+}
+
+.overlay-drag-edge:active {
+  cursor: grabbing;
+  background: rgba(99, 102, 241, 0.55);
+}
+
+/* Content area fills the remaining space below the drag strip */
+.overlay-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  /* Pointer events controlled per-widget; default pass-through */
+  pointer-events: none;
+}
+
+/* Widgets that need interaction set this on their root element */
+.overlay-content .interactive {
+  pointer-events: auto;
+}

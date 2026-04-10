@@ -20,7 +20,7 @@ use tauri_plugin_sql::Builder as SqlBuilder;
 
 use overlay::Rect;
 use hook::{inject_into_league, PipeMessage, PipeServer};
-use phase_manager::PhaseManager;
+use phase_manager::{PhaseManager, OverlayConfig};
 
 // ---------------------------------------------------------------------------
 // Application State
@@ -217,6 +217,29 @@ async fn is_phase_forced(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(*state.force_override.lock().unwrap())
 }
 
+/// Return the config for a specific overlay window by its id.
+///
+/// Called by overlay windows on mount so they can read their own `drag_edge`,
+/// `click_through`, etc.  The window label is `"phase-{id}"` — strip the prefix
+/// before calling this command.
+///
+/// # Example (JS — called from inside an overlay window)
+/// ```js
+/// import { getCurrentWindow } from '@tauri-apps/api/window';
+/// const label = getCurrentWindow().label;          // "phase-ingame-kda"
+/// const id    = label.replace(/^phase-/, '');      // "ingame-kda"
+/// const cfg   = await invoke('get_overlay_config', { id });
+/// ```
+#[tauri::command]
+async fn get_overlay_config(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<OverlayConfig>, String> {
+    Ok(state.phase_manager.lock().unwrap()
+        .get_overlay_config(&id)
+        .cloned())
+}
+
 /// Return the full platform configuration loaded from `config.toml`.
 ///
 /// # Example (JS)
@@ -327,6 +350,7 @@ async fn main() {
             release_forced_phase,
             get_current_phase,
             is_phase_forced,
+            get_overlay_config,
             get_platform_config,
         ])
         .run(tauri::generate_context!())

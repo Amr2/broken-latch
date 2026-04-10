@@ -1,0 +1,39 @@
+/* Widget styles — shared across all in-game overlay widgets */
+
+/* Interactive widget root — enables pointer events inside the window */
+.interactive {
+  pointer-events: auto;
+}
+
+/* ---- Game Timer ---- */
+.timer-widget {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0;
+  /* Timer is non-interactive — all pointer events pass through */
+  pointer-events: none;
+  user-select: none;
+}
+
+.timer-display {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #e2e8f0;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.timer-label {
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}

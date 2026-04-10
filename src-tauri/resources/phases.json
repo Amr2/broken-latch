@@ -1,100 +1,129 @@
 {
   "NOT_RUNNING": {
-    "windows": [],
+    "windows":  [],
     "overlays": []
   },
+
   "LAUNCHING": {
     "windows": [
       {
-        "id": "launching-win",
-        "url": "launching.html",
-        "title": "broken-latch — Launching",
-        "width": 480,
-        "height": 320,
-        "x": null,
-        "y": null,
-        "decorations": true,
+        "id":           "launching-win",
+        "url":          "launching.html",
+        "title":        "broken-latch — Launching",
+        "width":        480,
+        "height":       320,
+        "decorations":  true,
         "always_on_top": true,
-        "resizable": false
+        "resizable":    false
       }
     ],
     "overlays": []
   },
+
   "IN_LOBBY": {
     "windows": [
       {
-        "id": "lobby-win",
-        "url": "in-lobby.html",
-        "title": "broken-latch — Lobby",
-        "width": 580,
-        "height": 420,
-        "x": null,
-        "y": null,
-        "decorations": true,
-        "always_on_top": true,
-        "resizable": false
+        "id":           "lobby-win",
+        "url":          "in-lobby.html",
+        "title":        "broken-latch — Lobby",
+        "width":        580,
+        "height":       420,
+        "decorations":  true,
+        "always_on_top": false,
+        "resizable":    true
       }
     ],
     "overlays": []
   },
+
   "CHAMP_SELECT": {
     "windows": [
       {
-        "id": "champ-select-win",
-        "url": "champ-select.html",
-        "title": "broken-latch — Champ Select",
-        "width": 680,
-        "height": 520,
-        "x": null,
-        "y": null,
-        "decorations": true,
-        "always_on_top": true,
-        "resizable": false
+        "id":           "champ-select-win",
+        "url":          "champ-select.html",
+        "title":        "broken-latch — Champ Select",
+        "width":        680,
+        "height":       520,
+        "decorations":  true,
+        "always_on_top": false,
+        "resizable":    true
       }
     ],
     "overlays": []
   },
+
   "LOADING": {
     "windows": [
       {
-        "id": "loading-win",
-        "url": "loading.html",
-        "title": "broken-latch — Loading",
-        "width": 580,
-        "height": 420,
-        "x": null,
-        "y": null,
-        "decorations": true,
-        "always_on_top": true,
-        "resizable": false
+        "id":           "loading-win",
+        "url":          "loading.html",
+        "title":        "broken-latch — Loading",
+        "width":        580,
+        "height":       420,
+        "decorations":  true,
+        "always_on_top": false,
+        "resizable":    true
       }
     ],
     "overlays": []
   },
+
   "IN_GAME": {
     "windows": [],
     "overlays": [
       {
-        "id": "ingame-overlay",
-        "url": "ingame-overlay.html",
+        "id":      "ingame-kda",
+        "url":     "ingame-kda.html",
+        "width":   240,
+        "height":  200,
+        "x":       1670,
+        "y":       10,
         "opacity": 1.0,
-        "screen_capture_visible": false
+        "click_through":          false,
+        "always_on_top":          true,
+        "screen_capture_visible": false,
+        "drag_edge":              true
+      },
+      {
+        "id":      "ingame-cooldowns",
+        "url":     "ingame-cooldowns.html",
+        "width":   240,
+        "height":  180,
+        "x":       10,
+        "y":       870,
+        "opacity": 1.0,
+        "click_through":          false,
+        "always_on_top":          true,
+        "screen_capture_visible": false,
+        "drag_edge":              true
+      },
+      {
+        "id":      "ingame-timer",
+        "url":     "ingame-timer.html",
+        "width":   140,
+        "height":  50,
+        "x":       890,
+        "y":       10,
+        "opacity": 0.9,
+        "click_through":          true,
+        "always_on_top":          true,
+        "screen_capture_visible": false,
+        "drag_edge":              false
       }
     ]
   },
+
   "END_GAME": {
     "windows": [
       {
-        "id": "end-game-win",
-        "url": "end-game.html",
-        "title": "broken-latch — End of Game",
-        "width": 780,
-        "height": 580,
-        "x": null,
-        "y": null,
-        "decorations": true,
-        "always_on_top": true,
-        "resizable": false
+        "id":           "end-game-win",
+        "url":          "end-game.html",
+        "title":        "broken-latch — End of Game",
+        "width":        780,
+        "height":       580,
+        "decorations":  true,
+        "always_on_top": false,
+        "resizable":    true
       }
     ],
     "overlays": []

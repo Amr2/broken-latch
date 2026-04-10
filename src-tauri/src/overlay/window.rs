@@ -46,41 +46,63 @@ impl OverlayWindow {
         HWND(self.hwnd_raw as *mut core::ffi::c_void)
     }
 
-    /// Create a transparent fullscreen overlay window.
+    /// Create a transparent overlay window.
     ///
     /// # Arguments
-    /// * `app`   — Tauri AppHandle
-    /// * `label` — unique Tauri window identifier (e.g. "phase-ingame-overlay")
-    /// * `url`   — bundled page path ("ingame-overlay.html") or external URL
-    /// * `opacity` — initial opacity 0.0–1.0
-    /// * `screen_capture_visible` — whether OBS/Discord can capture this window
+    /// * `app`    — Tauri AppHandle
+    /// * `label`  — unique Tauri window identifier (e.g. "phase-ingame-kda")
+    /// * `url`    — bundled page path ("ingame-kda.html") or external URL
+    /// * `width`  — pixel width; `None` → covers full primary monitor width
+    /// * `height` — pixel height; `None` → covers full primary monitor height
+    /// * `x`      — left position; `None` + fullscreen → 0; `None` + sized → centred
+    /// * `y`      — top position; same rules as `x`
+    /// * `opacity`              — initial opacity 0.0–1.0
+    /// * `click_through`        — `WS_EX_TRANSPARENT` (default true)
+    /// * `always_on_top`        — `HWND_TOPMOST` (default true)
+    /// * `screen_capture_visible` — false → hidden from OBS/Discord (default false)
     pub fn create(
         app: &AppHandle,
         label: &str,
         url: &str,
+        width:  Option<u32>,
+        height: Option<u32>,
+        x: Option<i32>,
+        y: Option<i32>,
         opacity: f32,
+        click_through: bool,
+        always_on_top: bool,
         screen_capture_visible: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let (screen_w, screen_h) = unsafe {
             (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
         };
 
+        let fullscreen = width.is_none() && height.is_none();
+        let win_w = width.unwrap_or(screen_w as u32) as f64;
+        let win_h = height.unwrap_or(screen_h as u32) as f64;
+
         let webview_url = make_webview_url(url);
 
-        let window = tauri::WebviewWindowBuilder::new(app, label, webview_url)
+        let mut builder = tauri::WebviewWindowBuilder::new(app, label, webview_url)
             .transparent(true)
             .decorations(false)
-            .always_on_top(true)
+            .always_on_top(always_on_top)
             .skip_taskbar(true)
-            .inner_size(screen_w as f64, screen_h as f64)
-            .position(0.0, 0.0)
-            .visible(false)
-            .build()?;
+            .inner_size(win_w, win_h)
+            .visible(false);
+
+        builder = match (x, y) {
+            (Some(px), Some(py)) => builder.position(px as f64, py as f64),
+            _ if fullscreen      => builder.position(0.0, 0.0),
+            _                    => builder.center(),
+        };
+
+        let window = builder.build()?;
 
         let hwnd     = window.hwnd()?;
         let hwnd_raw = hwnd.0 as isize;
 
-        apply_overlay_styles(hwnd, screen_capture_visible)?;
+        apply_overlay_styles(hwnd, screen_capture_visible, click_through, always_on_top)?;
 
         let ov = Self {
             window,
@@ -88,7 +110,6 @@ impl OverlayWindow {
             interactive_regions: Arc::new(Mutex::new(Vec::new())),
         };
 
-        // Show immediately and apply opacity
         ov.show()?;
         ov.set_opacity(opacity)?;
 
@@ -187,21 +208,22 @@ impl OverlayWindow {
 // ---------------------------------------------------------------------------
 
 /// Apply Win32 extended styles required for overlay behaviour.
-fn apply_overlay_styles(hwnd: HWND, screen_capture_visible: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn apply_overlay_styles(
+    hwnd: HWND,
+    screen_capture_visible: bool,
+    click_through: bool,
+    always_on_top: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     unsafe {
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        let new_style = ex_style
-            | (WS_EX_LAYERED.0 as i32)
-            | (WS_EX_TRANSPARENT.0 as i32);
+        let mut new_style = ex_style | (WS_EX_LAYERED.0 as i32);
+        if click_through {
+            new_style |= WS_EX_TRANSPARENT.0 as i32;
+        }
         SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
 
-        // Keep on top of the game window
-        SetWindowPos(
-            hwnd,
-            Some(HWND_TOPMOST),
-            0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE,
-        )?;
+        let z_order = if always_on_top { HWND_TOPMOST } else { HWND_NOTOPMOST };
+        SetWindowPos(hwnd, Some(z_order), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)?;
 
         let affinity = if screen_capture_visible { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
         SetWindowDisplayAffinity(hwnd, affinity)?;

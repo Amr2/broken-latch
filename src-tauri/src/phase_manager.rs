@@ -1,77 +1,92 @@
 //! PhaseManager — drives window/overlay lifecycle across game phase transitions.
 //!
-//! # How it works
-//!
-//! Each game phase is declared in `src-tauri/resources/phases.json`.
-//! A phase entry lists zero or more *windows* (normal decorated Tauri windows)
-//! and zero or more *overlays* (transparent fullscreen Win32 overlay windows).
-//!
-//! When `transition(new_phase)` is called:
-//!   1. Windows/overlays present in the old phase but absent from the new one
-//!      are closed.
-//!   2. Windows/overlays present in the new phase but not already open are
-//!      created.
-//!   3. Windows/overlays whose `id` appears in BOTH phases are kept open
-//!      without interruption — useful for persistent widgets.
-//!
-//! # Window labels
-//! All phase-managed windows get the Tauri label `phase-{id}` so the
-//! `phase-windows` capability covers them with a single glob pattern.
-//!
-//! # URL resolution
-//! If `url` starts with `http://` or `https://`, a Tauri External WebviewUrl
-//! is used (opens the URL directly).  Otherwise the value is treated as a path
-//! to a bundled HTML page (e.g. `ingame-overlay.html`).
+//! Each phase in `phases.json` owns N independent windows and M independent
+//! overlays.  Every entry becomes a separate OS window.  On transition the
+//! manager diffs old vs new config: closes stale windows, opens new ones,
+//! leaves windows whose `id` appears in both phases untouched.
 
 use std::collections::{HashMap, HashSet};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, WebviewWindow};
 use crate::overlay::{OverlayWindow, make_webview_url};
 
 // ---------------------------------------------------------------------------
-// Config types  (deserialized from phases.json)
+// Config types  (phases.json schema)
 // ---------------------------------------------------------------------------
 
-/// Configuration for a normal (decorated or borderless) Tauri window.
-#[derive(Debug, Clone, Deserialize)]
+fn default_true()     -> bool { true }
+fn default_opacity()  -> f32  { 1.0  }
+
+/// Configuration for a normal OS window.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WindowConfig {
-    /// Unique identifier — also becomes the Tauri window label `phase-{id}`.
-    pub id: String,
-    /// Bundled HTML page name or full external URL.
-    pub url: String,
-    /// Window title bar text.
+    // --- identity ---
+    pub id:    String,
+    pub url:   String,
     #[serde(default)]
     pub title: String,
-    pub width: u32,
+
+    // --- size & position ---
+    pub width:  u32,
     pub height: u32,
-    /// Pixel position from top-left.  `null` → centre on primary monitor.
-    pub x: Option<i32>,
+    pub x: Option<i32>,   // null → OS centres the window
     pub y: Option<i32>,
-    /// Show OS window chrome (title bar, borders).
+    pub min_width:  Option<u32>,
+    pub min_height: Option<u32>,
+
+    // --- behaviour ---
+    #[serde(default = "default_true")]
     pub decorations: bool,
-    /// Keep above other windows.
+    #[serde(default)]                 // windows default to NOT topmost
     pub always_on_top: bool,
+    #[serde(default = "default_true")]
     pub resizable: bool,
+    #[serde(default)]
+    pub skip_taskbar: bool,
+    #[serde(default = "default_true")]
+    pub focused: bool,
 }
 
-/// Configuration for a transparent fullscreen overlay window.
-#[derive(Debug, Clone, Deserialize)]
+/// Configuration for an independent overlay OS window.
+/// Each entry = its own OS window (borderless, transparent, always-on-top by default).
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OverlayConfig {
-    /// Unique identifier — becomes the Tauri window label `phase-{id}`.
-    pub id: String,
-    /// Bundled HTML page name or full external URL.
+    // --- identity ---
+    pub id:  String,
     pub url: String,
-    /// Initial opacity 0.0 (invisible) – 1.0 (opaque).
+
+    // --- size & position ---
+    // null width + null height → fullscreen (covers entire primary monitor)
+    pub width:  Option<u32>,
+    pub height: Option<u32>,
+    pub x: Option<i32>,   // null + fullscreen → 0,0 ; null + sized → centred
+    pub y: Option<i32>,
+
+    // --- visual ---
+    #[serde(default = "default_opacity")]
     pub opacity: f32,
-    /// When `false` (default) the overlay is hidden from OBS/Discord/Game Bar.
-    pub screen_capture_visible: bool,
+
+    // --- behaviour ---
+    #[serde(default = "default_true")]
+    pub click_through: bool,            // WS_EX_TRANSPARENT  (default: true)
+    #[serde(default = "default_true")]
+    pub always_on_top: bool,            // HWND_TOPMOST       (default: true)
+    #[serde(default)]
+    pub screen_capture_visible: bool,   // WDA_EXCLUDEFROMCAPTURE inverse (default: false → hidden)
+
+    // --- drag edge ---
+    // Platform injects a 4 px drag strip at the top of the overlay.
+    // Only interactive when click_through = false.
+    // Developers can also call getCurrentWindow().startDragging() from any element.
+    #[serde(default = "default_true")]
+    pub drag_edge: bool,
 }
 
 /// All windows + overlays for a single phase.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct PhaseConfig {
     #[serde(default)]
-    pub windows: Vec<WindowConfig>,
+    pub windows:  Vec<WindowConfig>,
     #[serde(default)]
     pub overlays: Vec<OverlayConfig>,
 }
@@ -99,20 +114,28 @@ impl ManagedWindow {
 // ---------------------------------------------------------------------------
 
 pub struct PhaseManager {
-    /// Parsed contents of phases.json.
-    phases: HashMap<String, PhaseConfig>,
-    /// All currently open phase windows, keyed by their config `id`.
-    open: HashMap<String, ManagedWindow>,
-    /// Active phase string.
+    phases:       HashMap<String, PhaseConfig>,
+    /// Flat index: overlay id → config (for get_overlay_config command).
+    all_overlays: HashMap<String, OverlayConfig>,
+    open:         HashMap<String, ManagedWindow>,
     current_phase: String,
 }
 
 impl PhaseManager {
-    /// Construct from the raw JSON content of `phases.json`.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         let phases: HashMap<String, PhaseConfig> = serde_json::from_str(json)?;
+
+        // Build flat overlay lookup
+        let mut all_overlays = HashMap::new();
+        for cfg in phases.values() {
+            for ov in &cfg.overlays {
+                all_overlays.insert(ov.id.clone(), ov.clone());
+            }
+        }
+
         Ok(Self {
             phases,
+            all_overlays,
             open: HashMap::new(),
             current_phase: "NOT_RUNNING".to_string(),
         })
@@ -122,38 +145,38 @@ impl PhaseManager {
         &self.current_phase
     }
 
-    /// Transition to `new_phase`.
-    ///
-    /// Closes windows/overlays no longer needed, opens new ones, leaves shared
-    /// ones (same `id` in both phases) untouched.
-    /// Emits the `phase-changed` Tauri event after the transition.
+    /// Look up an overlay's config by its id (used by `get_overlay_config` command).
+    pub fn get_overlay_config(&self, id: &str) -> Option<&OverlayConfig> {
+        self.all_overlays.get(id)
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase transition
+    // -----------------------------------------------------------------------
+
     pub fn transition(
         &mut self,
         new_phase: &str,
         app: &AppHandle,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.current_phase == new_phase {
-            return Ok(());
-        }
+        if self.current_phase == new_phase { return Ok(()); }
 
-        let empty = PhaseConfig::default();
-        let new_cfg = self.phases.get(new_phase).cloned().unwrap_or_else(|| {
+        let empty    = PhaseConfig::default();
+        let new_cfg  = self.phases.get(new_phase).cloned().unwrap_or_else(|| {
             eprintln!("[phase] unknown phase '{}', treating as empty", new_phase);
             empty.clone()
         });
-        let old_cfg = self.phases.get(&self.current_phase).cloned().unwrap_or(empty);
+        let old_cfg  = self.phases.get(&self.current_phase).cloned().unwrap_or(empty);
 
-        // IDs required in new phase
         let new_ids: HashSet<String> = new_cfg.windows.iter().map(|w| w.id.clone())
             .chain(new_cfg.overlays.iter().map(|o| o.id.clone()))
             .collect();
 
-        // IDs present in old phase
         let old_ids: HashSet<String> = old_cfg.windows.iter().map(|w| w.id.clone())
             .chain(old_cfg.overlays.iter().map(|o| o.id.clone()))
             .collect();
 
-        // Close windows that are going away
+        // Close windows no longer needed
         for id in old_ids.difference(&new_ids) {
             if let Some(win) = self.open.remove(id) {
                 win.close();
@@ -169,7 +192,7 @@ impl PhaseManager {
                         println!("[phase] opened window  '{}'", win_cfg.id);
                         self.open.insert(win_cfg.id.clone(), ManagedWindow::Normal(w));
                     }
-                    Err(e) => eprintln!("[phase] window '{}' open error: {}", win_cfg.id, e),
+                    Err(e) => eprintln!("[phase] window '{}' error: {}", win_cfg.id, e),
                 }
             }
         }
@@ -182,7 +205,7 @@ impl PhaseManager {
                         println!("[phase] opened overlay '{}'", ov_cfg.id);
                         self.open.insert(ov_cfg.id.clone(), ManagedWindow::Overlay(o));
                     }
-                    Err(e) => eprintln!("[phase] overlay '{}' open error: {}", ov_cfg.id, e),
+                    Err(e) => eprintln!("[phase] overlay '{}' error: {}", ov_cfg.id, e),
                 }
             }
         }
@@ -194,15 +217,12 @@ impl PhaseManager {
     }
 
     // -----------------------------------------------------------------------
-    // Overlay control helpers (used by Tauri commands)
+    // Overlay helpers (for Tauri commands)
     // -----------------------------------------------------------------------
 
-    /// Return the first active overlay window (for opacity/region commands).
     pub fn first_overlay(&mut self) -> Option<&mut OverlayWindow> {
         for win in self.open.values_mut() {
-            if let ManagedWindow::Overlay(ov) = win {
-                return Some(ov);
-            }
+            if let ManagedWindow::Overlay(ov) = win { return Some(ov); }
         }
         None
     }
@@ -214,27 +234,35 @@ impl PhaseManager {
     fn open_window(app: &AppHandle, cfg: &WindowConfig) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
         let label = format!("phase-{}", cfg.id);
         let url   = make_webview_url(&cfg.url);
-
         let title = if cfg.title.is_empty() { cfg.id.clone() } else { cfg.title.clone() };
 
-        let mut builder = tauri::WebviewWindowBuilder::new(app, &label, url)
+        let mut b = tauri::WebviewWindowBuilder::new(app, &label, url)
             .title(title)
             .inner_size(cfg.width as f64, cfg.height as f64)
             .decorations(cfg.decorations)
             .always_on_top(cfg.always_on_top)
-            .resizable(cfg.resizable);
+            .resizable(cfg.resizable)
+            .skip_taskbar(cfg.skip_taskbar)
+            .focused(cfg.focused);
 
-        builder = if let (Some(x), Some(y)) = (cfg.x, cfg.y) {
-            builder.position(x as f64, y as f64)
+        if let Some(mw) = cfg.min_width  { b = b.min_inner_size(mw as f64, 0.0); }
+        if let Some(mh) = cfg.min_height { b = b.min_inner_size(0.0, mh as f64); }
+
+        b = if let (Some(x), Some(y)) = (cfg.x, cfg.y) {
+            b.position(x as f64, y as f64)
         } else {
-            builder.center()
+            b.center()
         };
 
-        Ok(builder.build()?)
+        Ok(b.build()?)
     }
 
     fn open_overlay(app: &AppHandle, cfg: &OverlayConfig) -> Result<OverlayWindow, Box<dyn std::error::Error>> {
         let label = format!("phase-{}", cfg.id);
-        OverlayWindow::create(app, &label, &cfg.url, cfg.opacity, cfg.screen_capture_visible)
+        OverlayWindow::create(
+            app, &label, &cfg.url,
+            cfg.width, cfg.height, cfg.x, cfg.y,
+            cfg.opacity, cfg.click_through, cfg.always_on_top, cfg.screen_capture_visible,
+        )
     }
 }
