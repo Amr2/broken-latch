@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import '../overlay/OverlayApp.css';   // provides .widget-panel background/border/font
 import '../stages/stages.css';
 import './widgets.css';
 
@@ -33,7 +34,7 @@ export default function CooldownWidget() {
       : `${s}s`;
 
   return (
-    <div className="widget-panel interactive" style={{ width: '100%', height: '100%', borderRadius: 0 }}>
+    <div className="widget-panel interactive" style={{ top: 0, left: 0, width: '100%', height: '100%', borderRadius: 0 }}>
       <span className="demo-badge">DEMO</span>
       <div className="widget-header">
         <span>⏱ Cooldowns</span>

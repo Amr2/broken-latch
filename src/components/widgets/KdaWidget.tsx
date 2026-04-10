@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import '../overlay/OverlayApp.css';   // provides .widget-panel background/border/font
 import '../stages/stages.css';
 import './widgets.css';
 
@@ -48,7 +49,7 @@ export default function KdaWidget() {
     return (
       <div
         className="widget-panel interactive"
-        style={{ padding: '5px 10px', cursor: 'pointer' }}
+        style={{ top: 0, left: 0, width: '100%', padding: '5px 10px', cursor: 'pointer' }}
         onClick={() => setVisible(true)}
       >
         <span style={{ fontSize: 11, color: '#888' }}>🎮 Show KDA</span>
@@ -57,7 +58,7 @@ export default function KdaWidget() {
   }
 
   return (
-    <div className="widget-panel interactive" style={{ width: '100%', height: '100%', borderRadius: 0 }}>
+    <div className="widget-panel interactive" style={{ top: 0, left: 0, width: '100%', height: '100%', borderRadius: 0 }}>
       <span className="demo-badge">DEMO</span>
       <div className="widget-header">
         <span>🎮 {MOCK_INITIAL.champion} Lv.{stats.level}</span>

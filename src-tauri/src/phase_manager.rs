@@ -184,6 +184,8 @@ impl PhaseManager {
             }
         }
 
+        let mut errors: Vec<String> = Vec::new();
+
         // Open new windows
         for win_cfg in &new_cfg.windows {
             if !self.open.contains_key(&win_cfg.id) {
@@ -192,7 +194,11 @@ impl PhaseManager {
                         println!("[phase] opened window  '{}'", win_cfg.id);
                         self.open.insert(win_cfg.id.clone(), ManagedWindow::Normal(w));
                     }
-                    Err(e) => eprintln!("[phase] window '{}' error: {}", win_cfg.id, e),
+                    Err(e) => {
+                        let msg = format!("window '{}': {}", win_cfg.id, e);
+                        eprintln!("[phase] ERROR opening {}", msg);
+                        errors.push(msg);
+                    }
                 }
             }
         }
@@ -205,7 +211,11 @@ impl PhaseManager {
                         println!("[phase] opened overlay '{}'", ov_cfg.id);
                         self.open.insert(ov_cfg.id.clone(), ManagedWindow::Overlay(o));
                     }
-                    Err(e) => eprintln!("[phase] overlay '{}' error: {}", ov_cfg.id, e),
+                    Err(e) => {
+                        let msg = format!("overlay '{}': {}", ov_cfg.id, e);
+                        eprintln!("[phase] ERROR opening {}", msg);
+                        errors.push(msg);
+                    }
                 }
             }
         }
@@ -213,7 +223,12 @@ impl PhaseManager {
         self.current_phase = new_phase.to_string();
         let _ = app.emit("phase-changed", new_phase);
         println!("[phase] → {}", new_phase);
-        Ok(())
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; ").into())
+        }
     }
 
     // -----------------------------------------------------------------------

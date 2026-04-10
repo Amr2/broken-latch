@@ -14,6 +14,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import '../overlay/OverlayApp.css';   // box-sizing reset + transparent root
 import './widgets.css';
 
 export default function GameTimerWidget() {
