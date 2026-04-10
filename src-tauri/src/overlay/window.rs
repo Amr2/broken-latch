@@ -6,22 +6,34 @@ use windows::Win32::{
 };
 use std::sync::{Arc, Mutex};
 
-/// Manages a single transparent fullscreen overlay window.
+/// Manages a single transparent overlay window.
 ///
-/// One `OverlayWindow` is created per overlay entry in `phases.json`.
-/// PhaseManager owns all live instances and creates/destroys them as phases
-/// transition.
+/// # Show / hide strategy
 ///
-/// # Win32 window properties applied after creation
-/// - `WS_EX_LAYERED`          — enables per-pixel alpha & opacity control
-/// - `WS_EX_TRANSPARENT`      — default click-through (passes input to game)
-/// - `WS_EX_TOPMOST`          — z-order above all other windows
-/// - `WDA_EXCLUDEFROMCAPTURE` — hidden from OBS/Discord screen capture by default
+/// We NEVER call `ShowWindow(SW_HIDE)` / `ShowWindow(SW_SHOW)` after the
+/// initial creation.  Toggling Win32 window visibility while a DirectX game
+/// is in fullscreen causes the game to briefly lose its swap-chain ownership
+/// (exit fullscreen), creating the "glitch / game minimises" bug.
+///
+/// Instead, we use **opacity-based soft hide/show**:
+///   - `soft_hide` → `SetLayeredWindowAttributes(alpha=0)` + `WS_EX_TRANSPARENT`
+///     The window is still "visible" to Win32 (no WS_VISIBLE change), fully
+///     transparent to the eye, and fully click-through.
+///   - `soft_show` → restore configured opacity + conditionally remove
+///     `WS_EX_TRANSPARENT`
+///
+/// Because the window's Z-order never changes and its WS_VISIBLE flag never
+/// changes, the DX swap chain is never disturbed — even in exclusive fullscreen.
 pub struct OverlayWindow {
     window: WebviewWindow,
     /// Raw HWND stored as `isize` so `OverlayWindow` implements `Send + Sync`.
     hwnd_raw: isize,
     interactive_regions: Arc<Mutex<Vec<Rect>>>,
+    /// Configured opacity (0.0–1.0) — restored on soft_show.
+    config_opacity: f32,
+    /// Whether this overlay is configured as click-through.
+    /// When soft_show is called, WS_EX_TRANSPARENT is restored only if true.
+    config_click_through: bool,
 }
 
 /// A screen-space rectangle used to describe an interactive widget area.
@@ -47,19 +59,6 @@ impl OverlayWindow {
     }
 
     /// Create a transparent overlay window.
-    ///
-    /// # Arguments
-    /// * `app`    — Tauri AppHandle
-    /// * `label`  — unique Tauri window identifier (e.g. "phase-ingame-kda")
-    /// * `url`    — bundled page path ("ingame-kda.html") or external URL
-    /// * `width`  — pixel width; `None` → covers full primary monitor width
-    /// * `height` — pixel height; `None` → covers full primary monitor height
-    /// * `x`      — left position; `None` + fullscreen → 0; `None` + sized → centred
-    /// * `y`      — top position; same rules as `x`
-    /// * `opacity`              — initial opacity 0.0–1.0
-    /// * `click_through`        — `WS_EX_TRANSPARENT` (default true)
-    /// * `always_on_top`        — `HWND_TOPMOST` (default true)
-    /// * `screen_capture_visible` — false → hidden from OBS/Discord (default false)
     pub fn create(
         app: &AppHandle,
         label: &str,
@@ -89,7 +88,7 @@ impl OverlayWindow {
             .always_on_top(always_on_top)
             .skip_taskbar(true)
             .inner_size(win_w, win_h)
-            .visible(false);
+            .visible(false);  // shown below via SW_SHOWNOACTIVATE
 
         builder = match (x, y) {
             (Some(px), Some(py)) => builder.position(px as f64, py as f64),
@@ -108,9 +107,14 @@ impl OverlayWindow {
             window,
             hwnd_raw,
             interactive_regions: Arc::new(Mutex::new(Vec::new())),
+            config_opacity: opacity,
+            config_click_through: click_through,
         };
 
-        ov.show()?;
+        // Show without activating — SW_SHOWNOACTIVATE leaves the foreground
+        // window unchanged so we never steal focus from the game.
+        unsafe { ShowWindow(ov.hwnd(), SW_SHOWNOACTIVATE); }
+
         if let Err(e) = ov.set_opacity(opacity) {
             eprintln!("[overlay] set_opacity failed (non-fatal): {}", e);
         }
@@ -118,10 +122,52 @@ impl OverlayWindow {
         Ok(ov)
     }
 
-    /// Define which screen regions intercept mouse input.
+    // -----------------------------------------------------------------------
+    // Soft show / hide  (opacity-based, Z-order unchanged)
+    // -----------------------------------------------------------------------
+
+    /// Hide the overlay without touching Win32 window visibility.
     ///
-    /// Calls Win32 `SetWindowRgn()` with a combined region.
-    /// Pass an empty list to make the entire window click-through.
+    /// Sets opacity to 0 and adds WS_EX_TRANSPARENT so the window is
+    /// both invisible and fully click-through.  The window's TOPMOST
+    /// Z-order is preserved so no DX fullscreen disruption occurs.
+    pub fn soft_hide(&self) {
+        unsafe {
+            // Make fully transparent
+            let _ = SetLayeredWindowAttributes(self.hwnd(), COLORREF(0), 0, LWA_ALPHA);
+            // Ensure click-through so invisible window doesn't block input
+            let ex_style = GetWindowLongW(self.hwnd(), GWL_EXSTYLE);
+            SetWindowLongW(self.hwnd(), GWL_EXSTYLE,
+                ex_style | (WS_EX_TRANSPARENT.0 as i32));
+        }
+    }
+
+    /// Restore the overlay to its configured opacity.
+    ///
+    /// Removes WS_EX_TRANSPARENT if the overlay is not configured as
+    /// click-through (so interactive widgets can receive input again).
+    /// Never changes TOPMOST Z-order.
+    pub fn soft_show(&self) {
+        unsafe {
+            // Restore configured opacity
+            let byte = (self.config_opacity.clamp(0.0, 1.0) * 255.0) as u8;
+            let _ = SetLayeredWindowAttributes(self.hwnd(), COLORREF(0), byte, LWA_ALPHA);
+            // Restore click-through state
+            let ex_style = GetWindowLongW(self.hwnd(), GWL_EXSTYLE);
+            let new_style = if self.config_click_through {
+                ex_style | (WS_EX_TRANSPARENT.0 as i32)
+            } else {
+                ex_style & !(WS_EX_TRANSPARENT.0 as i32)
+            };
+            SetWindowLongW(self.hwnd(), GWL_EXSTYLE, new_style);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Other controls
+    // -----------------------------------------------------------------------
+
+    /// Define which screen regions intercept mouse input.
     pub fn set_interactive_regions(&self, regions: Vec<Rect>) -> Result<(), Box<dyn std::error::Error>> {
         *self.interactive_regions.lock().unwrap() = regions.clone();
 
@@ -171,29 +217,13 @@ impl OverlayWindow {
         Ok(())
     }
 
+    /// Hard show via Tauri (only used outside of focus transitions).
     pub fn show(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.window.show()?;
         Ok(())
     }
 
-    /// Re-assert HWND_TOPMOST after the window is shown.
-    ///
-    /// Required for fullscreen support: when a DirectX game is running, our
-    /// overlay may have been pushed behind it.  Calling this whenever we show
-    /// the overlay forces Windows to bring it above the game's swap chain.
-    /// DWM keeps the compositor active on Windows 10/11 even for "fullscreen"
-    /// DirectX apps, so HWND_TOPMOST is honoured.
-    pub fn reassert_topmost(&self) {
-        unsafe {
-            let _ = SetWindowPos(
-                self.hwnd(),
-                Some(HWND_TOPMOST),
-                0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
-    }
-
+    /// Hard hide via Tauri (only used when closing a phase, not for focus).
     pub fn hide(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.window.hide()?;
         Ok(())
@@ -229,10 +259,7 @@ impl OverlayWindow {
 
 /// Apply Win32 extended styles required for overlay behaviour.
 ///
-/// Each call is isolated — a failure in one (e.g. `SetWindowDisplayAffinity`
-/// on older Windows builds, or `SetWindowPos` returning ERROR_NOT_ENOUGH_MEMORY
-/// when the system is resource-constrained) is logged but does NOT abort window
-/// creation.  The window is always shown; advanced features degrade gracefully.
+/// Each call is isolated — failures are logged but never abort window creation.
 fn apply_overlay_styles(
     hwnd: HWND,
     screen_capture_visible: bool,
@@ -240,7 +267,6 @@ fn apply_overlay_styles(
     always_on_top: bool,
 ) {
     unsafe {
-        // ── Extended styles ────────────────────────────────────────────────
         // WS_EX_LAYERED  → required for SetLayeredWindowAttributes (opacity)
         // WS_EX_TRANSPARENT → click-through (passes input to underlying window)
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
@@ -250,9 +276,8 @@ fn apply_overlay_styles(
         }
         SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
 
-        // ── Z-order ────────────────────────────────────────────────────────
-        // SWP_NOACTIVATE prevents focus stealing which can cause ERROR_NOT_ENOUGH_MEMORY
-        // on systems where activating a window needs extra kernel structures.
+        // Z-order — SWP_NOACTIVATE avoids ERROR_NOT_ENOUGH_MEMORY from
+        // Windows needing activation-context kernel structures.
         let z_order = if always_on_top { HWND_TOPMOST } else { HWND_NOTOPMOST };
         if let Err(e) = SetWindowPos(
             hwnd, Some(z_order),
@@ -262,10 +287,7 @@ fn apply_overlay_styles(
             eprintln!("[overlay] SetWindowPos z-order failed (non-fatal): {}", e);
         }
 
-        // ── Screen-capture exclusion ───────────────────────────────────────
-        // WDA_EXCLUDEFROMCAPTURE requires Windows 10 2004+ (build 19041).
-        // On older builds, or when DWM resources are low, this can fail —
-        // we log and continue rather than aborting window creation.
+        // WDA_EXCLUDEFROMCAPTURE requires Windows 10 2004+; degrade gracefully.
         let affinity = if screen_capture_visible { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
         if let Err(e) = SetWindowDisplayAffinity(hwnd, affinity) {
             eprintln!("[overlay] SetWindowDisplayAffinity failed (non-fatal): {}", e);
