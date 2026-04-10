@@ -242,6 +242,24 @@ impl PhaseManager {
         None
     }
 
+    /// Show or hide every open overlay window.
+    ///
+    /// Called by the focus monitor when the game gains/loses focus.
+    /// On show, each overlay re-asserts `HWND_TOPMOST` so it stays above the
+    /// game even in fullscreen DirectX mode.
+    pub fn set_overlay_visibility(&mut self, visible: bool) {
+        for win in self.open.values() {
+            if let ManagedWindow::Overlay(ov) = win {
+                if visible {
+                    let _ = ov.show();
+                    ov.reassert_topmost();   // push above fullscreen DX swap chain
+                } else {
+                    let _ = ov.hide();
+                }
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Private constructors
     // -----------------------------------------------------------------------

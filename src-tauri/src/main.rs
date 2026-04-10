@@ -37,6 +37,9 @@ pub struct AppState {
     /// When `true` the auto-detector will not override the current phase.
     /// Set by `simulate_phase`, cleared by `release_forced_phase`.
     pub force_override: Mutex<bool>,
+    /// PID of the running League of Legends game process (not client).
+    /// Written by game::detect every poll cycle; read by game::focus.
+    pub league_pid: Mutex<Option<u32>>,
     /// Copy of the TOML config loaded at startup.
     platform_config: config::PlatformConfig,
 }
@@ -299,6 +302,7 @@ async fn main() {
                 pipe_server:     Mutex::new(None),
                 hook_status:     Mutex::new("Not injected".to_string()),
                 force_override:  Mutex::new(false),
+                league_pid:      Mutex::new(None),
                 platform_config: cfg.clone(),
             });
 
@@ -329,6 +333,12 @@ async fn main() {
             let detector_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 game::start_detector(detector_handle).await;
+            });
+
+            // Start overlay focus monitor (show/hide overlays based on game focus)
+            let focus_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                game::start_focus_monitor(focus_handle).await;
             });
 
             println!("Platform ready — watching for League of Legends...");

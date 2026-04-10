@@ -61,6 +61,9 @@ pub async fn start_detector(app: AppHandle) {
 
         let state = app.state::<AppState>();
 
+        // Track the game process PID so the focus monitor can compare against it
+        *state.league_pid.lock().unwrap() = find_game_pid(&sys);
+
         // Skip transition if the dev dashboard is in force-override mode
         if !*state.force_override.lock().unwrap() {
             let current = state.phase_manager.lock().unwrap().current_phase().to_string();
@@ -153,4 +156,15 @@ fn find_lockfile(sys: &System) -> Option<PathBuf> {
 
     // Fallback: common install directories
     super::lcu::find_lockfile_default()
+}
+
+/// Return the PID of the running League of Legends game process (not the client).
+/// Returns `None` when the game is not running.
+pub fn find_game_pid(sys: &System) -> Option<u32> {
+    sys.processes().values()
+        .find(|p| {
+            let name = p.name().to_string();
+            name.contains("League of Legends") || name.contains("LeagueOfLegends")
+        })
+        .map(|p| p.pid().as_u32())
 }

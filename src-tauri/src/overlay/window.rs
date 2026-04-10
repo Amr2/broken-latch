@@ -176,6 +176,24 @@ impl OverlayWindow {
         Ok(())
     }
 
+    /// Re-assert HWND_TOPMOST after the window is shown.
+    ///
+    /// Required for fullscreen support: when a DirectX game is running, our
+    /// overlay may have been pushed behind it.  Calling this whenever we show
+    /// the overlay forces Windows to bring it above the game's swap chain.
+    /// DWM keeps the compositor active on Windows 10/11 even for "fullscreen"
+    /// DirectX apps, so HWND_TOPMOST is honoured.
+    pub fn reassert_topmost(&self) {
+        unsafe {
+            let _ = SetWindowPos(
+                self.hwnd(),
+                Some(HWND_TOPMOST),
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
+
     pub fn hide(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.window.hide()?;
         Ok(())
